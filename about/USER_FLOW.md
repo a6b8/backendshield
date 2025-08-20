@@ -1,7 +1,7 @@
 # BackendShield Flow Diagrams
 
 ## Overview
-This document shows both user journey and server-side processes in the BackendShield credit-based payment system, from initial USDC payment to provider compensation.
+This document shows the user journey and automated provider settlement process in the BackendShield credit-based payment system.
 
 ## User Flow Diagram
 
@@ -34,68 +34,24 @@ graph TD
     G1 --> H
 ```
 
-### Provider Compensation (Background)
-```mermaid
-graph LR
-    A[Usage Metrics] --> B[Statistics Server]
-    B --> C[Calculate Payouts] 
-    C --> D[Generate ZK Proofs]
-    D --> E[Encrypted On-chain Transfers]
-    E --> F[KYC Portal Claiming]
-```
-
----
-
-## Server Flow Diagram
-
-### Payment Processing Flow
+### Provider Settlement (Automated Background Process)
 ```mermaid
 graph TD
-    A[EIP-3009 USDC received] --> B[Validate authorization]
-    B --> C[Log payment amount]
-    C --> D[Convert to eERC-20 credits]
-    D --> E[Encrypt credit balance]
-    E --> F[Store in private ledger]
-    F --> G[Send confirmation to user]
-```
-
-### API Request Processing Flow  
-```mermaid
-graph TD
-    A[API request + signature] --> B[Validate signature]
-    B --> C[Check credit balance]
-    C -->|Insufficient| D[Return error]
-    C -->|Sufficient| E[Deduct credits privately]
-    E --> F[Forward to MCP Provider]
-    F --> G[Receive provider response]
-    G --> H[Log metrics privately]
-    H --> I[Return response to user]
-```
-
-### Provider Payout Processing
-```mermaid
-graph TD
-    A[Statistics server polls] --> B[Aggregate usage metrics]
-    B --> C[Calculate provider shares]
-    C --> D[Generate ZK proofs]
-    D --> E[Create encrypted transactions]
-    E --> F[Submit to blockchain]
-    F --> G[Update provider balances]
-    G --> H[Notify via KYC portal]
-```
-
-### Server State Management
-```mermaid
-graph LR
-    A[User Registry] --> B[Credit Ledger]
-    B --> C[Metrics Database]
-    C --> D[Provider Registry]
+    A[Timer: Every 24h] --> B[Statistics Server polls all MCP servers]
+    B --> C[Collect usage metrics for each provider]
+    C --> D[Calculate share percentages]
     
-    B --> E[eERC-20 Interaction]
-    E --> F[Blockchain State]
+    D --> E{Enough volume for payout?}
+    E -->|No| F[Wait for next cycle]
+    E -->|Yes| G[Generate ZK proofs for transactions]
     
-    C --> G[ZK Proof Generator]
-    G --> H[Payout Calculator]
+    G --> H[Create encrypted eERC-20 transfers]
+    H --> I[Submit batch to Avalanche blockchain]
+    I --> J[Update provider balances privately]
+    J --> K[Send notifications to KYC portal]
+    
+    K --> L[Providers can claim their funds]
+    F --> A
 ```
 
 ## Flow Details
