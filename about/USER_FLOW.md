@@ -1,56 +1,59 @@
 # BackendShield Flow Diagrams
 
 ## Overview
-This document shows the user journey and automated provider settlement process in the BackendShield credit-based payment system.
+This document shows the user journey and automated Data Provider settlement process in the BackendShield credit-based payment system.
 
 ## User Flow Diagram
 
 ### Main Flow
 ```mermaid
 graph TD
-    A[User wants to use MCP Server] --> B{Has Credits?}
+    A[User wants to use FlowMCP Server] --> B{Has Credits?}
     
     B -->|No| C[Payment Flow]
     B -->|Yes| D[API Usage Flow]
     
     C --> C1[Connect Wallet]
-    C1 --> C2[Authorize USDC via EIP-3009]
-    C2 --> C3[Server converts to eERC-20 credits]
-    C3 --> D
+    C1 --> C2[Pay USDC to FlowMCP via EIP-3009]
+    C2 --> C3[FlowMCP validates payment]
+    C3 --> C4[FlowMCP notifies BackendShield]
+    C4 --> C5[BackendShield converts to eERC-20 credits]
+    C5 --> D
     
-    D --> D1[Make API request with signed message]
-    D1 --> D2[Server validates & deducts credits]
-    D2 --> D3[Forward to MCP Provider]
+    D --> D1[Make API request to FlowMCP]
+    D1 --> D2[FlowMCP checks credits with BackendShield]
+    D2 --> D3[Forward to Data Provider]
     D3 --> D4[Return API response]
-    D4 --> D5{Continue?}
+    D4 --> D5[FlowMCP submits metrics to BackendShield]
+    D5 --> D6{Continue?}
     
-    D5 -->|Yes| D1
-    D5 -->|Check Balance| F[Query Balance]
-    D5 -->|Withdraw| G[Withdraw USDC]
-    D5 -->|No| H[End Session]
+    D6 -->|Yes| D1
+    D6 -->|Check Balance| F[Query Balance via FlowMCP]
+    D6 -->|Withdraw| G[Request Withdrawal]
+    D6 -->|No| H[End Session]
     
-    F --> D5
-    G --> G1[Convert eERC-20 back to USDC]
+    F --> D6
+    G --> G1[BackendShield converts eERC-20 back to USDC]
     G1 --> H
 ```
 
-### Provider Settlement (Automated Background Process)
+### Data Provider Settlement (Automated Background Process)
 ```mermaid
 graph TD
-    A[Timer: Every 24h] --> B[Statistics Server polls all MCP servers]
-    B --> C[Collect usage metrics for each provider]
-    C --> D[Calculate share percentages]
+    A[Timer: Every 24h] --> B[BackendShield aggregates metrics from all FlowMCP servers]
+    B --> C[Calculate usage share for each Data Provider]
+    C --> D[Calculate payout percentages]
     
-    D --> E{Enough volume for payout?}
+    D --> E{Enough volume for settlement?}
     E -->|No| F[Wait for next cycle]
     E -->|Yes| G[Generate ZK proofs for transactions]
     
     G --> H[Create encrypted eERC-20 transfers]
     H --> I[Submit batch to Avalanche blockchain]
-    I --> J[Update provider balances privately]
+    I --> J[Update Data Provider balances privately]
     J --> K[Send notifications to KYC portal]
     
-    K --> L[Providers can claim their funds]
+    K --> L[Data Providers can claim their funds]
     F --> A
 ```
 
@@ -73,11 +76,11 @@ graph TD
 - **Top-up**: Same as initial payment
 - **Withdrawal**: Convert remaining eERC-20 back to USDC
 
-### 4. Provider Compensation (Background)
-- **Frequency**: Regular automated polling
+### 4. Data Provider Compensation (Background)
+- **Frequency**: Regular automated polling (24h cycles)
 - **Privacy**: Payout amounts encrypted via ZK proofs
-- **Distribution**: Based on actual usage metrics
-- **Claiming**: Providers use KYC web portal
+- **Distribution**: Based on actual usage metrics from FlowMCP servers
+- **Claiming**: Data Providers use KYC web portal
 
 ## Key Privacy Features
 
@@ -86,7 +89,7 @@ graph TD
 | Initial USDC Payment | Public on blockchain | ❌ No privacy |
 | Credit Balance | Server knows, blockchain encrypted | ✅ Private amounts |
 | API Usage Patterns | Server tracks, blockchain encrypted | ✅ Private usage |
-| Provider Payouts | Server knows, blockchain encrypted | ✅ Private earnings |
+| Data Provider Payouts | BackendShield knows, blockchain encrypted | ✅ Private earnings |
 
 ## User Experience Benefits
 
@@ -110,10 +113,10 @@ graph TD
 - `processing_request` → Handling API call
 - `logging_metrics` → Recording usage privately
 
-### Provider States  
-- `serving_requests` → Processing API calls
-- `metrics_collected` → Usage logged for payout
-- `payout_calculated` → Ready for distribution
+### Data Provider States  
+- `serving_requests` → Processing API calls via FlowMCP
+- `metrics_collected` → Usage logged by BackendShield for payout
+- `payout_calculated` → Ready for encrypted distribution
 - `funds_claimable` → Available via KYC portal
 
-This flow ensures maximum privacy while maintaining simplicity for users and fair compensation for providers.
+This flow ensures maximum privacy while maintaining simplicity for users and fair compensation for Data Providers.

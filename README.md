@@ -2,7 +2,7 @@
 
 **Privacy-enhanced x402 payment system for MCP servers**
 
-*Credit-based micropayments eliminate payment friction while encrypting transaction amounts and provider earnings on-chain*
+*Credit-based micropayments eliminate payment friction while encrypting transaction amounts and Data Provider earnings on-chain*
 
 ## 📋 Quick Navigation
 
