@@ -1,7 +1,7 @@
-# BackendShield User Flow Diagram
+# BackendShield Flow Diagrams
 
 ## Overview
-This diagram shows the complete user journey through the BackendShield credit-based payment system, from initial USDC payment to provider compensation.
+This document shows both user journey and server-side processes in the BackendShield credit-based payment system, from initial USDC payment to provider compensation.
 
 ## User Flow Diagram
 
@@ -44,20 +44,58 @@ graph LR
     E --> F[KYC Portal Claiming]
 ```
 
-### Alternative: Visual ASCII Flow
-```
-User Journey:
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Need Credits  │ -> │  Pay with USDC  │ -> │ Get eERC Credits│
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                       │
-                                                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  End / Withdraw │ <- │  API Response   │ <- │  Use API (Sign) │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+---
 
-Privacy Layer:
-USDC Payment (Public) -> eERC Credits (Encrypted) -> Usage (Private)
+## Server Flow Diagram
+
+### Payment Processing Flow
+```mermaid
+graph TD
+    A[EIP-3009 USDC received] --> B[Validate authorization]
+    B --> C[Log payment amount]
+    C --> D[Convert to eERC-20 credits]
+    D --> E[Encrypt credit balance]
+    E --> F[Store in private ledger]
+    F --> G[Send confirmation to user]
+```
+
+### API Request Processing Flow  
+```mermaid
+graph TD
+    A[API request + signature] --> B[Validate signature]
+    B --> C[Check credit balance]
+    C -->|Insufficient| D[Return error]
+    C -->|Sufficient| E[Deduct credits privately]
+    E --> F[Forward to MCP Provider]
+    F --> G[Receive provider response]
+    G --> H[Log metrics privately]
+    H --> I[Return response to user]
+```
+
+### Provider Payout Processing
+```mermaid
+graph TD
+    A[Statistics server polls] --> B[Aggregate usage metrics]
+    B --> C[Calculate provider shares]
+    C --> D[Generate ZK proofs]
+    D --> E[Create encrypted transactions]
+    E --> F[Submit to blockchain]
+    F --> G[Update provider balances]
+    G --> H[Notify via KYC portal]
+```
+
+### Server State Management
+```mermaid
+graph LR
+    A[User Registry] --> B[Credit Ledger]
+    B --> C[Metrics Database]
+    C --> D[Provider Registry]
+    
+    B --> E[eERC-20 Interaction]
+    E --> F[Blockchain State]
+    
+    C --> G[ZK Proof Generator]
+    G --> H[Payout Calculator]
 ```
 
 ## Flow Details
