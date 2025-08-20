@@ -1,0 +1,1565 @@
+Directory structure:
+└── flowmcp-x402-core/
+    ├── README.md
+    ├── LICENSE
+    ├── package.json
+    ├── src/
+    │   ├── index.mjs
+    │   ├── helpers/
+    │   │   └── NonceStore.mjs
+    │   └── task/
+    │       ├── ClientExact.mjs
+    │       └── ServerExact.mjs
+    ├── tests/
+    │   ├── 1-full-process.mjs
+    │   └── helpers/
+    │       └── EnvironmentManager.mjs
+    └── .github/
+        ├── test-on-release.mjs
+        └── workflows/
+            └── test-on-release.yml
+
+================================================
+FILE: README.md
+================================================
+[![Test](https://img.shields.io/github/actions/workflow/status/FlowMCP/x402-core/test-on-release.yml)](https://github.com/FlowMCP/x402-core/actions) ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
+# x402-core
+Authorization-based ERC20 payment layer using EIP-3009 and `X-PAYMENT` headers.
+
+x402-core provides client and server-side building blocks for EIP-3009-based token authorization flows. It enables secure, gas-efficient, and trust-minimized payments for web services by exchanging signed `transferWithAuthorization` payloads through custom headers. The module supports both validation and settlement of transactions, and includes matching mechanisms between client-supported and server-required payment options.
+
+## Quickstart
+
+Install and test the module in a local environment with a client-server flow using EIP-3009 and `X-PAYMENT` headers.
+
+```bash
+git clone https://github.com/FlowMCP/x402-core
+cd x402-core
+npm i
+````
+
+### Imports and Setup
+
+```js
+import { ClientExact, ServerExact, NonceStore } from 'x402-core'
+import { EnvironmentManager } from './helpers/EnvironmentManager.mjs'
+
+const chainId = '84532'
+const envPath = './../../.env'
+
+// Example config object (shortened)
+const cfg = {
+    client: { /* client config for chain */ },
+    server: { /* server config for chain */ }
+}
+```
+
+### 1. Setup Payment Requirements (Server)
+
+> Use:
+>
+> * `cfg.server[chainId]` → server configuration
+> * `serverCredentials` → resolved from .env using `EnvironmentManager`
+
+```js
+const { privateKey: serverPrivateKey, x402Credentials: serverCredentials } = EnvironmentManager
+    .getCredentials( {
+        envPath,
+        envSelection: cfg['server'][ chainId ]['envSelection']
+    } )
+
+const { preparedPaymentOptions } = ServerExact
+    .getPreparedPaymentOptions( {
+        paymentOptions: cfg['server'][ chainId ]['paymentOptions'],
+        activePaymentOptions: cfg['server'][ chainId ]['activePaymentOptions'],
+        serverCredentials
+    } )
+
+const { paymentRequirementsPayload } = ServerExact
+    .getPaymentRequirementsPayload( {
+        chainId,
+        chainName: cfg['server'][ chainId ]['chainName'],
+        preparedPaymentOptions,
+        contracts: cfg['server'][ chainId ]['contracts']
+    } )
+```
+
+### 2. Create Authorization (Client)
+
+> Use:
+>
+> * `cfg.client[chainId]` → client configuration
+> * `clientCredentials` → resolved from .env using `EnvironmentManager`
+> * `paymentRequirementsPayload` → vom Server
+
+```js
+const { privateKey: clientPrivateKey, x402Credentials: clientCredentials } = EnvironmentManager
+    .getCredentials( {
+        envPath,
+        envSelection: cfg['client'][ chainId ]['envSelection']
+    } )
+
+const { paymentOption } = ClientExact
+    .selectMatchingPaymentOption( {
+        paymentRequirementsPayload,
+        allowedPaymentOptions: cfg['client'][ chainId ]['allowedPaymentOptions'],
+        chainId
+    } )
+
+const client = new ClientExact()
+    .init( { providerUrl: clientCredentials.clientProviderUrl } )
+
+await client.setWallet( {
+    privateKey: clientPrivateKey,
+    allowedPaymentOptions: cfg['client'][ chainId ]['allowedPaymentOptions']
+} )
+
+const { authorization, signature } = await client
+    .createAuthorization( {
+        paymentOption,
+        allowedPaymentOptions: cfg['client'][ chainId ]['allowedPaymentOptions'],
+        chainId
+    } )
+
+const { headerString } = client
+    .createXPaymentHeader( {
+        scheme: paymentOption.scheme,
+        network: paymentOption.network,
+        authorization,
+        signature
+    } )
+```
+
+### 3. Validate and Settle (Server)
+
+> Use:
+>
+> * `serverPrivateKey` → from Step 1
+> * `paymentRequirementsPayload` → from Step 1
+> * `headerString` → received from client
+
+```js
+const nonceStore = new NonceStore()
+
+const server = new ServerExact( { nonceStore } )
+    .init( { providerUrl: serverCredentials.serverProviderUrl } )
+
+await server.setWallet( { privateKey: serverPrivateKey } )
+
+const { decodedPayment } = server
+    .decodePaymentHeader( { headerString } )
+
+const { selectedRequirement } = server
+    .findMatchingPaymentRequirements( {
+        paymentRequirementsPayload,
+        decodedPayment
+    } )
+
+const validationResult = await server
+    .validatePayment( {
+        decodedPayment,
+        paymentRequirement: selectedRequirement
+    } )
+
+const simulationResult = await server
+    .simulateTransaction( {
+        decodedPayment,
+        tokenAddress: paymentOption.extra.domain.verifyingContract
+    } )
+
+const settlementResult = await server
+    .settleTransaction( {
+        decodedPayment,
+        tokenAddress: paymentOption.extra.domain.verifyingContract
+    } )
+```
+
+## Features
+
+* **Client-side Token Authorization**
+  Sign and generate EIP-3009 `transferWithAuthorization` messages from local wallets for secure, gasless payments.
+
+* **Server-side Payment Requirement Management**
+  Define, configure, and publish token-based payment requirements dynamically via `X-PAYMENT` headers.
+
+* **Validation & Replay Protection**
+  Fully validates signature, time window, chain, and nonce — with built-in replay protection using `NonceStore`.
+
+* **Dry-Run Support with `eth_call`**
+  Simulate token transfers on-chain before broadcasting, catching invalid states or errors before settlement.
+
+* **Settlement via Meta-Transactions**
+  Server executes authorized transfers with `settleTransaction()` — no user gas fees, full control over execution.
+
+## Table of Contents
+
+- [x402-core](#x402-core)
+  - [Quickstart](#quickstart)
+    - [Imports and Setup](#imports-and-setup)
+    - [1. Setup Payment Requirements (Server)](#1-setup-payment-requirements-server)
+    - [2. Create Authorization (Client)](#2-create-authorization-client)
+    - [3. Validate and Settle (Server)](#3-validate-and-settle-server)
+  - [Features](#features)
+  - [Table of Contents](#table-of-contents)
+  - [METHODS – ClientExact](#methods--clientexact)
+    - [.selectMatchingPaymentOption()](#selectmatchingpaymentoption)
+    - [.init()](#init)
+    - [.setWallet()](#setwallet)
+    - [.createAuthorization()](#createauthorization)
+    - [.createXPaymentHeader()](#createxpaymentheader)
+  - [METHODS – ServerExact](#methods--serverexact)
+    - [.getPreparedPaymentOptions()](#getpreparedpaymentoptions)
+    - [.getPaymentRequirementsPayload()](#getpaymentrequirementspayload)
+    - [.init()](#init-1)
+    - [.setWallet()](#setwallet-1)
+    - [.decodePaymentHeader()](#decodepaymentheader)
+    - [.findMatchingPaymentRequirements()](#findmatchingpaymentrequirements)
+    - [.validatePayment()](#validatepayment)
+    - [.simulateTransaction()](#simulatetransaction)
+    - [.settleTransaction()](#settletransaction)
+  - [Contribution](#contribution)
+  - [License](#license)
+
+
+
+
+
+## METHODS – ClientExact
+This class provides utilities for handling on-chain authorization flows for token-based payments using the "exact" scheme. The available methods support wallet setup, token balance inspection, authorization creation, and payment header generation. See also [.init()](#init), [.setWallet()](#setWallet), [.createAuthorization()](#createauthorization), and [.createXPaymentHeader()](#createxpaymentheader).
+
+### .selectMatchingPaymentOption()
+Matches a client-side allowed payment option with one of the server's advertised requirements in the `"exact"` scheme. This is typically the first step before creating a payment authorization.
+
+**Method**
+```
+static .selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } )
+```
+
+| Key                     | Type              | Description                                                              | Required |
+|------------------------|-------------------|--------------------------------------------------------------------------|----------|
+| paymentRequirementsPayload | object         | The payload from the server containing supported payment options.        | Yes      |
+| allowedPaymentOptions  | array of objects   | Options the client is willing to pay with, including tokenAddress, etc.  | Yes      |
+| chainId                | string or number   | The blockchain chain ID to match against the server requirements.        | Yes      |
+
+**Example**
+```js
+const { paymentOption } = ClientExact
+    .selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } )
+```
+
+**Returns**
+```js
+returns { paymentOption }
+```
+
+| Key           | Type   | Description                               |
+|---------------|--------|-------------------------------------------|
+| paymentOption | object | The selected server-side payment option.  |
+
+---
+
+### .init()
+Initializes the ClientExact instance by connecting to a given provider URL and preparing the ABI for reading balances and token decimals.
+
+**Method**
+```
+.init( { providerUrl } )
+```
+
+| Key         | Type   | Description                          | Required |
+|-------------|--------|--------------------------------------|----------|
+| providerUrl | string | Full HTTP URL of the blockchain node | Yes      |
+
+**Example**
+```js
+const client = new ClientExact()
+    .init( { providerUrl: 'https://base-sepolia.node.provider' } )
+```
+
+**Returns**
+```js
+returns this
+```
+
+| Key   | Type         | Description                                 |
+|-------|--------------|---------------------------------------------|
+| this  | ClientExact  | The initialized instance for method chaining. |
+
+---
+
+### .setWallet()
+Loads a private key into the client and fetches token balances for all allowed payment options. Also logs the capacity to fulfill payments based on current wallet balances.
+
+**Method**
+```
+.setWallet( { privateKey, allowedPaymentOptions } )
+```
+
+| Key                  | Type              | Description                                                                 | Required |
+|----------------------|-------------------|-----------------------------------------------------------------------------|----------|
+| privateKey           | string            | The private key of the wallet (with or without `0x` prefix).                | Yes      |
+| allowedPaymentOptions| array of objects  | List of token payment options client is configured to support.              | Yes      |
+
+**Example**
+```js
+await client
+    .setWallet( { privateKey, allowedPaymentOptions } )
+```
+
+**Returns**
+```js
+returns this
+```
+
+| Key   | Type         | Description                                |
+|-------|--------------|--------------------------------------------|
+| this  | ClientExact  | Returns the same instance for chaining.    |
+
+---
+
+### .createAuthorization()
+Creates a signed EIP-3009 `TransferWithAuthorization` message based on the selected payment option. This step is required before generating a payment header.
+
+**Method**
+```
+.createAuthorization( { paymentOption, allowedPaymentOptions, chainId } )
+```
+
+| Key                  | Type              | Description                                                                 | Required |
+|----------------------|-------------------|-----------------------------------------------------------------------------|----------|
+| paymentOption         | object            | The payment option selected via [.selectMatchingPaymentOption()](#selectmatchingpaymentoption). | Yes      |
+| allowedPaymentOptions | array of objects  | The full list of allowed token options including decimals info.             | Yes      |
+| chainId               | string or number  | The blockchain chain ID.                                                    | Yes      |
+
+**Example**
+```js
+const { authorization, signature } = await client
+    .createAuthorization( { paymentOption, allowedPaymentOptions, chainId } )
+```
+
+**Returns**
+```js
+returns { authorization, signature }
+```
+
+| Key           | Type     | Description                                                 |
+|---------------|----------|-------------------------------------------------------------|
+| authorization | object   | The structured authorization message (EIP-3009 format).     |
+| signature     | string   | Signature for the authorization message.                    |
+
+---
+
+### .createXPaymentHeader()
+Creates the final `X-PAYMENT` header string which includes the authorization and its signature. This header can be sent to the server for validation and execution.
+
+**Method**
+```
+.createXPaymentHeader( { scheme, network, authorization, signature } )
+```
+
+| Key           | Type     | Description                                                                 | Required |
+|---------------|----------|-----------------------------------------------------------------------------|----------|
+| scheme        | string   | The payment scheme (should be `'exact'`).                                   | Yes      |
+| network       | string   | Network name, e.g. `'base-sepolia'`.                                        | Yes      |
+| authorization | object   | The `authorization` object from [.createAuthorization()](#createauthorization). | Yes  |
+| signature     | string   | The signed authorization.                                                   | Yes      |
+
+**Example**
+```js
+const { headerString } = client
+    .createXPaymentHeader( { scheme, network, authorization, signature } )
+```
+
+**Returns**
+```js
+returns { headerString }
+```
+
+| Key          | Type   | Description                                       |
+|--------------|--------|---------------------------------------------------|
+| headerString | string | The full JSON-encoded `X-PAYMENT` header string.  |
+
+---
+
+## METHODS – ServerExact
+The `ServerExact` class facilitates the server-side flow of the "exact" payment scheme. It prepares payment requirements, validates incoming authorization headers, simulates token transfers, and settles transactions on-chain.
+
+### .getPreparedPaymentOptions()
+Resolves template variables in the `payTo` fields of active payment options using the server's credentials, and prepares a finalized object with payment options ready to send to clients.
+
+**Method**
+```
+static .getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials } )
+```
+
+| Key               | Type              | Description                                                              | Required |
+|-------------------|-------------------|--------------------------------------------------------------------------|----------|
+| paymentOptions     | object            | Full mapping of all possible payment options by contract ID.             | Yes      |
+| activePaymentOptions | array of strings | List of contract IDs to be activated.                                    | Yes      |
+| serverCredentials  | object            | Key-value pairs used to replace `{{...}}` placeholders in `payTo`.       | Yes      |
+
+**Example**
+```js
+const { preparedPaymentOptions } = ServerExact
+    .getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials } )
+```
+
+**Returns**
+```js
+returns { preparedPaymentOptions }
+```
+
+| Key                    | Type   | Description                                                   |
+|------------------------|--------|---------------------------------------------------------------|
+| preparedPaymentOptions | object | Payment options with resolved `payTo` values, keyed by ID.    |
+
+---
+
+### .getPaymentRequirementsPayload()
+Generates a full `paymentRequirementsPayload` that can be served to the client. Includes information like target contract, network, domain details, and limits.
+
+**Method**
+```
+static .getPaymentRequirementsPayload( { chainId, chainName, preparedPaymentOptions, contracts, resource='' } )
+```
+
+| Key                   | Type             | Description                                                                | Required |
+|------------------------|------------------|----------------------------------------------------------------------------|----------|
+| chainId                | string or number | The blockchain chain ID.                                                   | Yes      |
+| chainName              | string           | The network name (e.g. `'base-sepolia'`).                                  | Yes      |
+| preparedPaymentOptions | object           | Output from [.getPreparedPaymentOptions()](#getpreparedpaymentoptions).    | Yes      |
+| contracts              | object           | Mapping of contract details by ID, including `domainName`, `decimals`, etc.| Yes      |
+| resource               | string           | Optional resource context for the payment.                                 | No       |
+
+**Example**
+```js
+const { paymentRequirementsPayload } = ServerExact
+    .getPaymentRequirementsPayload( { chainId, chainName, preparedPaymentOptions, contracts, resource: '' } )
+```
+
+**Returns**
+```js
+returns { paymentRequirementsPayload }
+```
+
+| Key                      | Type   | Description                                                |
+|--------------------------|--------|------------------------------------------------------------|
+| paymentRequirementsPayload | object | Structured payload to be sent to clients.                  |
+
+---
+
+### .init()
+Initializes the server facilitator by connecting to the blockchain provider and preparing the contract ABI used for token interaction.
+
+**Method**
+```
+.init( { providerUrl } )
+```
+
+| Key         | Type   | Description                          | Required |
+|-------------|--------|--------------------------------------|----------|
+| providerUrl | string | Full HTTP URL of the blockchain node | Yes      |
+
+**Example**
+```js
+const server = new ServerExact( { nonceStore } )
+    .init( { providerUrl } )
+```
+
+**Returns**
+```js
+returns this
+```
+
+| Key   | Type        | Description                                   |
+|-------|-------------|-----------------------------------------------|
+| this  | ServerExact | The initialized instance for method chaining. |
+
+---
+
+### .setWallet()
+Sets the wallet private key on the server, connects it via `viem`, and logs or verifies ETH balance sufficiency.
+
+**Method**
+```
+.setWallet( { privateKey, minEth = '0.01' } )
+```
+
+| Key      | Type   | Description                                               | Required |
+|----------|--------|-----------------------------------------------------------|----------|
+| privateKey | string | The private key of the facilitator wallet (with or without `0x`). | Yes  |
+| minEth     | string | Minimum ETH required for settlement operations.          | No       |
+
+**Example**
+```js
+await server
+    .setWallet( { privateKey, minEth: '0.02' } )
+```
+
+**Returns**
+```js
+returns this
+```
+
+| Key   | Type        | Description                                   |
+|-------|-------------|-----------------------------------------------|
+| this  | ServerExact | The same instance for chaining.               |
+
+---
+
+### .decodePaymentHeader()
+Parses and converts a received `X-PAYMENT` header string into a usable internal payment structure. Also casts numeric fields like `value`, `validAfter`, and `validBefore` to `BigInt`.
+
+**Method**
+```
+.decodePaymentHeader( { headerString } )
+```
+
+| Key          | Type   | Description                                   | Required |
+|--------------|--------|-----------------------------------------------|----------|
+| headerString | string | The JSON-encoded `X-PAYMENT` header received from the client. | Yes |
+
+**Example**
+```js
+const { decodedPayment } = server
+    .decodePaymentHeader( { headerString } )
+```
+
+**Returns**
+```js
+returns { decodedPayment }
+```
+
+| Key            | Type   | Description                               |
+|----------------|--------|-------------------------------------------|
+| decodedPayment | object | The parsed and normalized payment object. |
+
+---
+
+### .findMatchingPaymentRequirements()
+Searches through the provided `paymentRequirementsPayload` and finds the requirement that matches the authorization details (scheme, network, payTo).
+
+**Method**
+```
+.findMatchingPaymentRequirements( { paymentRequirementsPayload, decodedPayment } )
+```
+
+| Key                       | Type   | Description                                                         | Required |
+|---------------------------|--------|---------------------------------------------------------------------|----------|
+| paymentRequirementsPayload | object | The payload originally sent to the client.                          | Yes      |
+| decodedPayment            | object | The parsed object from [.decodePaymentHeader()](#decodepaymentheader). | Yes      |
+
+**Example**
+```js
+const { selectedRequirement } = server
+    .findMatchingPaymentRequirements( { paymentRequirementsPayload, decodedPayment } )
+```
+
+**Returns**
+```js
+returns { selectedRequirement }
+```
+
+| Key                | Type   | Description                                             |
+|--------------------|--------|---------------------------------------------------------|
+| selectedRequirement| object or null | The matching requirement, or `null` if not found.   |
+
+---
+
+### .validatePayment()
+Performs basic validation checks on the payment, including time window checks and replay protection via nonce tracking.
+
+**Method**
+```
+.validatePayment( { decodedPayment, paymentRequirement } )
+```
+
+| Key                | Type   | Description                                                                | Required |
+|--------------------|--------|----------------------------------------------------------------------------|----------|
+| decodedPayment     | object | Result of [.decodePaymentHeader()](#decodepaymentheader).                  | Yes      |
+| paymentRequirement | object | The selected requirement from [.findMatchingPaymentRequirements()](#findmatchingpaymentrequirements). | Yes |
+
+**Example**
+```js
+const result = await server
+    .validatePayment( { decodedPayment, paymentRequirement: selectedRequirement } )
+```
+
+**Returns**
+```js
+returns { ok, error? }
+```
+
+| Key   | Type    | Description                                      |
+|--------|---------|--------------------------------------------------|
+| ok     | boolean | `true` if validation passed, `false` otherwise. |
+| error  | string  | Optional error message if validation failed.     |
+
+---
+
+### .simulateTransaction()
+Simulates a token transfer using `eth_call` to detect potential execution errors without sending a transaction.
+
+**Method**
+```
+.simulateTransaction( { decodedPayment, tokenAddress } )
+```
+
+| Key            | Type   | Description                                | Required |
+|----------------|--------|--------------------------------------------|----------|
+| decodedPayment | object | Parsed payment header, including signature. | Yes      |
+| tokenAddress   | string | Contract address of the token to be transferred. | Yes |
+
+**Example**
+```js
+const simulationResult = await server
+    .simulateTransaction( { decodedPayment, tokenAddress } )
+```
+
+**Returns**
+```js
+returns { ok, error? }
+```
+
+| Key   | Type    | Description                                       |
+|--------|---------|---------------------------------------------------|
+| ok     | boolean | `true` if simulation succeeded, `false` if failed |
+| error  | string  | Optional error message if simulation failed       |
+
+---
+
+### .settleTransaction()
+Sends the actual `transferWithAuthorization` transaction to the blockchain using the server's wallet.
+
+**Method**
+```
+.settleTransaction( { decodedPayment, tokenAddress } )
+```
+
+| Key            | Type   | Description                                | Required |
+|----------------|--------|--------------------------------------------|----------|
+| decodedPayment | object | Parsed and validated payment header         | Yes      |
+| tokenAddress   | string | Address of the token contract               | Yes      |
+
+**Example**
+```js
+const settlementResult = await server
+    .settleTransaction( { decodedPayment, tokenAddress } )
+```
+
+**Returns**
+```js
+returns { ok, txHash }
+```
+
+| Key    | Type    | Description                                |
+|--------|---------|--------------------------------------------|
+| ok     | boolean | Whether the settlement transaction was broadcast |
+| txHash | string  | Transaction hash of the submitted transaction    |
+
+
+
+## Contribution
+
+Contributions are welcome!
+If you encounter bugs, have feature suggestions, or want to improve the module, feel free to open an issue or submit a pull request.
+
+
+## License
+
+This project is licensed under the MIT License.
+See the [LICENSE](./LICENSE) file for details.
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+Copyright (c) 2025 αηdr3α5 ɮαηɦօlʐ3ʀ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+FILE: package.json
+================================================
+{
+  "name": "x402-core",
+  "version": "0.4.0",
+  "description": "",
+  "main": "./src/index.mjs",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+},
+  "keywords": [],
+  "author": "a6b8",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.31.4"
+  }
+}
+
+
+
+================================================
+FILE: src/index.mjs
+================================================
+import { ClientExact } from './task/ClientExact.mjs'
+import { ServerExact } from './task/ServerExact.mjs'
+import { NonceStore } from './helpers/NonceStore.mjs'
+
+
+export { ClientExact, ServerExact, NonceStore }
+
+
+================================================
+FILE: src/helpers/NonceStore.mjs
+================================================
+class NonceStore {
+    constructor() {
+        this.store = new Set()
+    }
+
+
+    isUsed( { nonceKey } ) {
+        return this.store.has( nonceKey )
+    }
+
+
+    markUsed( { nonceKey } ) {
+        this.store.add( nonceKey )
+    }
+}
+
+
+export { NonceStore }
+
+
+================================================
+FILE: src/task/ClientExact.mjs
+================================================
+import { createPublicClient, createWalletClient, http, parseUnits, parseAbi, encodeFunctionData, getContract, formatUnits } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { randomBytes } from 'crypto'
+
+
+function logTable(title, rows) {
+    console.log(`\n===== ${title} =====`)
+    for (const [key, value] of Object.entries(rows)) {
+        console.log(`${key.padEnd(20)}: ${value}`)
+    }
+    console.log('===========================\n')
+}
+
+
+class ClientExact {
+    #provider
+    #abi
+    #clientSigner
+    #silent
+
+    constructor( { silent = false } ) {
+        this.#silent = silent
+    }
+
+
+    static selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } ) {
+        const allowedList = allowedPaymentOptions
+            .map( ( { tokenAddress, maxAmountRequired } ) => ( {
+                tokenAddress: tokenAddress.toLowerCase(),
+                maxAmountRequired: parseFloat( maxAmountRequired )
+            } ) )
+
+        const match = paymentRequirementsPayload['accepts']
+            .filter( ( { scheme } ) => scheme === 'exact' )
+            .find( ( paymentOption ) => {
+                const verifyingContract = paymentOption.extra.domain.verifyingContract.toLowerCase()
+                const serverChainId = paymentOption.extra.domain.chainId
+                const serverAmount = parseFloat( paymentOption.maxAmountRequired )
+
+                if( serverChainId.toString() !== chainId.toString() ) {
+                    return false
+                }
+
+                const isMatch = allowedList
+                    .some( ( { tokenAddress, maxAmountRequired } ) => 
+                        tokenAddress === verifyingContract && maxAmountRequired <= serverAmount
+                    )
+
+                return isMatch
+            } )
+
+        if( !match ) {
+            throw new Error( 'No matching payment option found for client' )
+        }
+
+        return { paymentOption: match }
+    }
+
+
+    init( { providerUrl } ) {
+        const provider = createPublicClient( { transport: http( providerUrl ) } )
+        this.#provider = provider
+
+        this.#abi = parseAbi( [
+            'function balanceOf(address owner) view returns (uint256)',
+            'function decimals() view returns (uint8)'
+        ] )
+
+        this.#log( '✅ Client initialized' )
+        return this
+    }
+
+
+    async setWallet( { privateKey, allowedPaymentOptions } ) {
+        const cleanHex = privateKey.startsWith( '0x' ) ? privateKey : `0x${ privateKey }`
+        this.#clientSigner = privateKeyToAccount( cleanHex )
+        const accountAddress = this.#clientSigner.address
+
+        const balances = []
+
+        for ( const option of allowedPaymentOptions ) {
+            const tokenAddress = option.tokenAddress
+            const usdcContract = getContract( {
+                address: tokenAddress,
+                abi: this.#abi,
+                client: this.#provider
+            } )
+
+            let balanceRaw
+            let decimals
+
+            try {
+                [ balanceRaw, decimals ] = await Promise.all( [
+                    usdcContract.read.balanceOf( [ accountAddress ] ),
+                    usdcContract.read.decimals()
+                ] )
+            } catch( err ) {
+                console.warn( `⚠ Failed to read token ${ tokenAddress }:`, err )
+
+                continue
+            }
+
+            const balance = Number( formatUnits( balanceRaw, decimals ) )
+
+            balances.push( {
+                name: option.name,
+                tokenAddress,
+                decimals,
+                balance,
+                minRequired: parseFloat( option.maxAmountRequired ),
+                paymentCapacity: Math.floor( balance / parseFloat( option.maxAmountRequired ) )
+            } )
+        }
+
+        if( !this.#silent ) {
+            balances
+                .forEach( ( entry ) => {
+                    const sufficient = entry.balance >= entry.minRequired ? '✅ Sufficient' : '⚠ Insufficient'
+                    logTable( `Wallet Balance for ${ entry.name }`, {
+                        'Token Address': entry.tokenAddress,
+                        'Balance': `${ entry.balance } (${ entry.decimals } decimals)` ,
+                        'Min Required': `${ entry.minRequired }`,
+                        'Capacity': `${ entry.paymentCapacity } payments possible`,
+                        'Status': sufficient
+                    } )
+                } )
+        }
+
+        balances
+            .forEach( ( entry ) => {
+                if( entry.balance < entry.minRequired ) {
+                    console.warn( `⚠ Balance of ${ entry.name } below required threshold: ${ entry.balance } < ${ entry.minRequired }` )
+                }
+            } )
+
+        return this
+    }
+
+
+    async createAuthorization( { paymentOption, allowedPaymentOptions, chainId } ) {
+        const { extra, payTo, maxAmountRequired, maxTimeoutSeconds } = paymentOption
+        const { domain } = extra
+        const { verifyingContract, chainId: domainChainId } = domain
+
+        const from = this.#clientSigner.address
+        const to = payTo
+
+        const allowed = allowedPaymentOptions
+            .find( ( option ) => option.tokenAddress.toLowerCase() === domain.verifyingContract.toLowerCase() )
+
+        if( !allowed ) {
+            throw new Error( `Token ${ domain.verifyingContract } not allowed for client` )
+        }
+
+        if( domainChainId.toString() !== chainId.toString() ) {
+            throw new Error( `ChainId mismatch: expected ${ chainId }, but got ${ domainChainId }` )
+        }
+
+        const decimals = allowed.decimals
+        const value = parseUnits( maxAmountRequired.toString(), decimals )
+        const validAfter = BigInt( Math.floor( Date.now() / 1000 ) - 30 )
+        const validBefore = validAfter + BigInt( maxTimeoutSeconds || 60 )
+
+        const nonce = '0x' + randomBytes( 32 ).toString( 'hex' )
+
+        const authorization = { from, to, value, validAfter, validBefore, nonce }
+        const signature = await this.#clientSigner.signTypedData( {
+            domain,
+            types: {
+                TransferWithAuthorization: [
+                    { name: 'from', type: 'address' },
+                    { name: 'to', type: 'address' },
+                    { name: 'value', type: 'uint256' },
+                    { name: 'validAfter', type: 'uint256' },
+                    { name: 'validBefore', type: 'uint256' },
+                    { name: 'nonce', type: 'bytes32' }
+                ]
+            },
+            primaryType: 'TransferWithAuthorization',
+            message: authorization
+        } )
+
+        this.#log( '✅ Authorization created' )
+
+        return { authorization, signature }
+    }
+
+
+    createXPaymentHeader( { scheme, network, authorization, signature } ) {
+        const safeAuthorization = {
+            ...authorization,
+            value: authorization.value.toString(),
+            validAfter: authorization.validAfter.toString(),
+            validBefore: authorization.validBefore.toString()
+        }
+
+        const headerString = JSON.stringify( { x402Version: 1, scheme, network, payload: { signature, authorization: safeAuthorization } } )
+        this.#log( '✅ X-PAYMENT Header generated' )
+        return { headerString }
+    }
+
+
+    #log( message ) {
+        if( !this.#silent ) {
+            console.log( message )
+        }
+    }
+}
+
+
+export { ClientExact }
+
+
+
+================================================
+FILE: src/task/ServerExact.mjs
+================================================
+import { createPublicClient, createWalletClient, http, parseUnits, parseAbi, encodeFunctionData, getContract, formatUnits } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+
+function logTable(title, rows) {
+    console.log(`\n===== ${title} =====`)
+    for (const [key, value] of Object.entries(rows)) {
+        console.log(`${key.padEnd(20)}: ${value}`)
+    }
+    console.log('===========================\n')
+}
+
+class ServerExact {
+    #nonceStore
+    #provider
+    #walletClient
+    #providerUrl
+    #abi
+    #facilitatorSigner
+    #silent
+
+
+    constructor( { nonceStore, silent = false } ) {
+        this.#nonceStore = nonceStore
+        this.#silent = silent
+    }
+
+
+    #log( message ) {
+        if( !this.#silent ) {
+            console.log( message )
+        }
+    }
+
+
+    init( { providerUrl } ) {
+        this.#providerUrl = providerUrl
+        this.#provider = createPublicClient( { transport: http( this.#providerUrl ) } )
+
+        this.#abi = parseAbi( [
+            'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
+            'function balanceOf(address owner) view returns (uint256)',
+            'function name() view returns (string)',
+            'function symbol() view returns (string)',
+            'function decimals() view returns (uint8)'
+        ] )
+
+        this.#log( '✅ Facilitator initialized' )
+        return this
+    }
+
+
+    static getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials } ) {
+        const prepared = activePaymentOptions.reduce( ( acc, contractId ) => {
+            const option = paymentOptions[ contractId ]
+            if( !option ) {
+                throw new Error( `ContractId ${ contractId } not found in paymentOptions` )
+            }
+
+            const { payTo } = option
+            const searchKey = payTo.replaceAll( '{{', '' ).replaceAll( '}}', '' )
+            const payToValue = serverCredentials[ searchKey ]
+            if( !payToValue ) {
+                throw new Error( `PayTo value for ${searchKey} not found in serverCredentials` )
+            }
+
+            acc[ contractId ] = { ...option, payTo: payToValue }
+            return acc
+        }, {} )
+
+        return { preparedPaymentOptions: prepared }
+    }
+
+
+    static getPaymentRequirementsPayload( { chainId, chainName, preparedPaymentOptions, contracts, resource='' } ) {
+        const accepts = Object.entries( preparedPaymentOptions )
+            .map( ( [ contractId, paymentOption ] ) => {
+                const { maxAmountRequired, payTo } = paymentOption
+                const contract = contracts[ contractId ]
+                const { address: verifyingContract, decimals, domainName: name } = contract
+
+                return {
+                    scheme: 'exact',
+                    network: chainName,
+                    payTo,
+                    maxAmountRequired,
+                    maxTimeoutSeconds: 300,
+                    extra: {
+                        domain: {
+                            name,
+                            version: '2',
+                            chainId: parseInt( chainId ),
+                            verifyingContract
+                        },
+                        resource
+                    }
+                }
+            } )
+
+        return { paymentRequirementsPayload: { x402Version: 1, errorCode: '', error: '', accepts } }
+    }
+
+
+    async setWallet( { privateKey, minEth = '0.01' } ) {
+        const cleanHex = privateKey.startsWith( '0x' ) ? privateKey : `0x${ privateKey }`
+        this.#facilitatorSigner = privateKeyToAccount( cleanHex )
+        const accountAddress = this.#facilitatorSigner.address
+
+        this.#walletClient = createWalletClient( {
+            account: this.#facilitatorSigner,
+            transport: http( this.#providerUrl )
+        } )
+
+        const balanceRaw = await this.#provider.getBalance( { address: accountAddress } )
+        const balance = Number( formatUnits( balanceRaw, 18 ) )
+
+        if( !this.#silent ) {
+            logTable( 'Facilitator Wallet', {
+                'Address': accountAddress,
+                'ETH Balance': `${ balance } ETH`
+            } )
+        }
+
+        if( balance < parseFloat( minEth ) ) {
+            console.warn( '⚠ Facilitator ETH balance below minimum threshold' )
+        }
+
+        return this
+    }
+
+
+    decodePaymentHeader( { headerString } ) {
+        const decodedPayment = JSON.parse( headerString )
+        const authorization = decodedPayment.payload.authorization
+
+        authorization.value = BigInt( authorization.value )
+        authorization.validAfter = BigInt( authorization.validAfter )
+        authorization.validBefore = BigInt( authorization.validBefore )
+
+        this.#log( '✅ Payment header decoded' )
+        return { decodedPayment }
+    }
+
+
+    findMatchingPaymentRequirements( { paymentRequirementsPayload, decodedPayment } ) {
+        const selectedRequirement = paymentRequirementsPayload[ 'accepts' ]
+            .find( ( pr ) =>
+                pr.scheme === decodedPayment.scheme &&
+                pr.network === decodedPayment.network &&
+                pr.payTo.toLowerCase() === decodedPayment.payload.authorization.to.toLowerCase()
+            ) || null
+
+        if( selectedRequirement ) {
+            this.#log( '✅ Matching payment requirement found' )
+        } else {
+            this.#log( '❌ No matching payment requirement found' )
+        }
+
+        return { selectedRequirement }
+    }
+
+
+    async validatePayment( { decodedPayment, paymentRequirement } ) {
+        const message = decodedPayment.payload.authorization
+        const now = BigInt( Math.floor( Date.now() / 1000 ) )
+
+        if( now < message.validAfter || now > message.validBefore ) {
+            return { ok: false, error: 'Authorization expired or not yet valid' }
+        }
+
+        const nonceKey = `${ message.from.toLowerCase() }-${ message.nonce.toLowerCase() }`
+        if( this.#nonceStore.isUsed( { nonceKey } ) ) {
+            return { ok: false, error: 'Nonce already used (replay detected)' }
+        }
+
+        this.#nonceStore.markUsed( { nonceKey } )
+        this.#log( '✅ Payment validated successfully' )
+        return { ok: true }
+    }
+
+
+    async simulateTransaction( { decodedPayment, tokenAddress } ) {
+        const { authorization: auth, signature } = decodedPayment.payload
+        const { from, to, value, validAfter, validBefore, nonce } = auth
+        const { v, r, s } = this.#splitVRS( signature )
+
+        const data = encodeFunctionData( {
+            abi: this.#abi,
+            functionName: 'transferWithAuthorization',
+            args: [ from, to, value, validAfter, validBefore, nonce, v, r, s ]
+        } )
+
+        try {
+            await this.#provider.call( { to: tokenAddress, data } )
+            this.#log( '✅ Simulation successful' )
+            return { ok: true }
+        } catch( e ) {
+            this.#log( `❌ Simulation failed: ${ e.message }` )
+            return { ok: false, error: e.message }
+        }
+    }
+
+
+    async settleTransaction( { decodedPayment, tokenAddress } ) {
+        const { authorization: auth, signature } = decodedPayment.payload
+        const { from, to, value, validAfter, validBefore, nonce } = auth
+        const { v, r, s } = this.#splitVRS( signature )
+
+        const data = encodeFunctionData( {
+            abi: this.#abi,
+            functionName: 'transferWithAuthorization',
+            args: [ from, to, value, validAfter, validBefore, nonce, v, r, s ]
+        } )
+
+        const hash = await this.#walletClient.sendTransaction( {
+            to: tokenAddress,
+            data
+        } )
+
+        this.#log( `✅ Settlement broadcasted: ${ hash }` )
+        return { ok: true, txHash: hash }
+    }
+
+
+    #splitVRS( signatureHex ) {
+        const sig = signatureHex.startsWith( '0x' ) ? signatureHex.slice( 2 ) : signatureHex
+        const r = '0x' + sig.slice( 0, 64 )
+        const s = '0x' + sig.slice( 64, 128 )
+        const v = parseInt( sig.slice( 128, 130 ), 16 )
+        return { v, r, s }
+    }
+}
+
+
+export { ServerExact }
+
+
+================================================
+FILE: tests/1-full-process.mjs
+================================================
+import {  ClientExact,  ServerExact,  NonceStore  } from '../src/index.mjs'
+import { EnvironmentManager } from './helpers/EnvironmentManager.mjs'
+
+
+const cfg = {
+    'server': {
+        '84532': {
+            'chainName': 'base-sepolia',
+            'envSelection': [
+                [ 'facilitatorBasePrivateKey', 'ACCOUNT_DEVELOPMENT2_PRIVATE_KEY' ],
+                [ 'payTo1',                    'ACCOUNT_DEVELOPMENT2_PUBLIC_KEY'  ],
+                [ 'serverProviderUrl',         'BASE_SEPOLIA_ALCHEMY_HTTP'        ]
+            ],
+            'activePaymentOptions': [
+                'usdc-sepolia'
+            ],
+            'paymentOptions': {
+                'usdc-sepolia': { 
+                    'contractId': 'usdc-sepolia',
+                    'maxAmountRequired': '0.01',
+                    'payTo': '{{payTo1}}',
+                }
+            },
+            'contracts': {
+                'usdc-sepolia': {
+                    'domainName': 'USDC',
+                    'address': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                    'assetType': 'erc20',
+                    'decimals': 6
+                }
+            }
+        }
+    },
+    'client': {
+        '84532': {
+            'chainName': 'base-sepolia',
+            'envSelection': [
+                [ 'clientPrivateKey',          'ACCOUNT_DEVELOPMENT_PRIVATE_KEY' ],
+                [ 'clientProviderUrl',         'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+            ],
+            'allowedPaymentOptions': [
+                { 
+                    'name': 'USDC',
+                    'tokenAddress': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                    'decimals': 6,
+                    'maxAmountRequired': '0.01' 
+                }
+            ]
+        }
+    }
+}
+const chainId = '84532'
+const envPath = './../../.env'
+
+// 1️⃣ Prepare Environment
+const { x402Credentials: clientCredentials, privateKey: clientPrivateKey } = EnvironmentManager
+    .getCredentials( { envPath, envSelection: cfg['client'][ chainId ]['envSelection'] } )
+const { x402Credentials: serverCredentials, privateKey: serverPrivateKey } = EnvironmentManager
+    .getCredentials( { envPath, envSelection: cfg['server'][ chainId ]['envSelection'] } )
+console.log( 'Server credentials:', serverCredentials )
+console.log( 'client credentials:', clientCredentials )
+// 2️⃣ Server static paymentRequirementsPayload
+const { chainName, contracts, paymentOptions, activePaymentOptions } = cfg['server'][ chainId ]
+const { preparedPaymentOptions } = ServerExact
+    .getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials } )
+const { paymentRequirementsPayload } = ServerExact
+    .getPaymentRequirementsPayload( { chainId, chainName, preparedPaymentOptions, contracts, resource: '' } )
+
+// 3️⃣ Client initialize
+const { allowedPaymentOptions } = cfg['client'][ chainId ]
+const { paymentOption } = ClientExact
+    .selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } ) 
+
+const { scheme, network } = paymentOption
+const { clientProviderUrl } = clientCredentials
+const { extra: { domain: { verifyingContract } } } = paymentOption
+
+const client = new ClientExact( { silent: false } )
+    .init( { providerUrl: clientProviderUrl } )
+await client
+    .setWallet( { privateKey: clientPrivateKey, allowedPaymentOptions } )
+
+const { authorization, signature } = await client
+    .createAuthorization( { paymentOption, allowedPaymentOptions, chainId } )
+const { headerString } = client
+    .createXPaymentHeader( { scheme, network, authorization, signature } )
+
+// 4️⃣ Server decode payment header
+const { serverProviderUrl } = serverCredentials
+const nonceStore = new NonceStore()
+const server = new ServerExact( { nonceStore, silent: false } )
+    .init( { providerUrl: serverProviderUrl } )
+await server
+    .setWallet( { privateKey: serverPrivateKey } )
+
+const receivedHeaderString = headerString
+const { decodedPayment } = server
+    .decodePaymentHeader({ headerString: receivedHeaderString })
+const { selectedRequirement } = server
+    .findMatchingPaymentRequirements( { paymentRequirementsPayload, decodedPayment } )
+if( !selectedRequirement ) {
+    console.error( 'No matching payment requirement found' )
+    process.exit( 1 )
+}
+
+const validationResult = await server
+    .validatePayment( { decodedPayment, paymentRequirement: selectedRequirement } )
+if( !validationResult.ok ) {
+    console.error( 'Payment validation failed:', validationResult.error )
+    process.exit( 1 )
+}
+
+const simulationResult = await server
+    .simulateTransaction( { decodedPayment, tokenAddress: verifyingContract } )
+if( !simulationResult.ok ) {
+    console.error( 'Simulation failed:', simulationResult.error )
+    process.exit( 1 )
+}
+
+const settlementResult = await server
+    .settleTransaction( { decodedPayment, tokenAddress: verifyingContract } )
+if( !settlementResult.ok ) {
+    console.error( 'Settlement failed' )
+    process.exit( 1 )
+}
+
+
+================================================
+FILE: tests/helpers/EnvironmentManager.mjs
+================================================
+import fs from "fs"
+
+
+class EnvironmentManager {
+    static getCredentials( { envPath, envSelection } ) {
+        const rawEnv = this
+            .#loadEnv( { envPath} )
+            .split( "\n" )
+            .filter( line => line && !line.startsWith( '#' ) && line.includes( '=' ) )
+            .map( line => line.split( '=' ) )
+            .reduce( ( acc, [ k, v ] ) => {
+                acc[ k ] = v.trim()
+                return acc
+            }, {} )
+
+        const messages = []
+        const selection = envSelection
+            .reduce( ( acc, select ) => {
+                const [ varName, envKey ] = select
+                if( Array.isArray( envKey ) ) {
+                    acc[ varName ] = envKey
+                        .map( key => {
+                            const item = rawEnv[ key ]
+                            if ( item === undefined ) {
+                                messages.push( `Missing environment variable: ${key}` )
+                            }
+                            return item
+                        } )
+                } else {
+                    acc[ varName ] = rawEnv[ envKey ]
+                }
+                return acc
+            }, {} )
+
+        if( messages.length > 0 ) {
+            throw new Error( `Environment loading failed: ${ messages.join( ', ' ) }` )
+        }
+
+        const { x402Credentials, privateKey } = Object
+            .entries( selection )
+            .reduce( ( acc, [ key, value ] ) => {
+                if( key.toLowerCase().includes( 'privatekey' ) ) {
+                    if( acc['privateKey'] !== null ) { console.warn( `Multiple private keys found, using the first one` ); return acc }
+                    acc['privateKey'] = value
+                } else {
+                    acc['x402Credentials'][ key ] = value
+                }
+                return acc
+            }, { 'x402Credentials': {}, 'privateKey': null } )
+
+        return { x402Credentials, privateKey }
+    }
+
+/*
+    static getCredentials( { envObject, envSelection } ) {
+        const messages = []
+        const selection = envSelection
+            .reduce( ( acc, select ) => {
+                const [ varName, envKey ] = select
+                if( Array.isArray( envKey ) ) {
+                    acc[ varName ] = envKey
+                        .map( key => {
+                            const item = envObject[ key ]
+                            if ( item === undefined ) {
+                                messages.push( `Missing environment variable: ${key}` )
+                            }
+                            return item
+                        } )
+                } else {
+                    acc[ varName ] = envObject[ envKey ]
+                }
+                return acc
+            }, {} )
+
+        const { x402Credentials, privateKey } = Object
+            .entries( selection )
+            .reduce( ( acc, [ key, value ] ) => {
+                if( key.toLowerCase().includes( 'privatekey' ) ) {
+                    if( acc['privateKey'] !== null ) { console.warn( `Multiple private keys found, using the first one` ); return acc }
+                    acc['privateKey'] = value
+                } else {
+                    acc['x402Credentials'][ key ] = value
+                }
+                return acc
+            }, { 'x402Credentials': {}, 'privateKey': null } )
+
+        if ( messages.length > 0 ) {
+            throw new Error( `X402Config.getCredentials: ${messages.join( ", \n" )}` )
+        }
+
+        return { x402Credentials, privateKey }
+    }
+*/
+
+    static #loadEnv( { envPath } ) {
+        if( !envPath ) {
+            console.error( `No environment file found for stage type: ${stageType}` )
+            return false
+        }
+
+        const envFile = fs
+            .readFileSync( envPath, 'utf-8' )
+        return envFile
+    }
+}
+
+
+export { EnvironmentManager }
+
+
+================================================
+FILE: .github/test-on-release.mjs
+================================================
+import {  ClientExact,  ServerExact,  NonceStore  } from './../src/index.mjs'
+import { EnvironmentManager } from './../tests/helpers/EnvironmentManager.mjs'
+
+
+const cfg = {
+    'server': {
+        '84532': {
+            'chainName': 'base-sepolia',
+            'envSelection': [
+                [ 'facilitatorBasePrivateKey', 'ACCOUNT_DEVELOPMENT2_PRIVATE_KEY' ],
+                [ 'payTo1',                    'ACCOUNT_DEVELOPMENT2_PUBLIC_KEY'  ],
+                [ 'serverProviderUrl',         'BASE_SEPOLIA_ALCHEMY_HTTP'        ]
+            ],
+            'activePaymentOptions': [
+                'usdc-sepolia'
+            ],
+            'paymentOptions': {
+                'usdc-sepolia': { 
+                    'contractId': 'usdc-sepolia',
+                    'maxAmountRequired': '0.01',
+                    'payTo': '{{payTo1}}',
+                }
+            },
+            'contracts': {
+                'usdc-sepolia': {
+                    'domainName': 'USDC',
+                    'address': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                    'assetType': 'erc20',
+                    'decimals': 6
+                }
+            }
+        }
+    },
+    'client': {
+        '84532': {
+            'chainName': 'base-sepolia',
+            'envSelection': [
+                [ 'clientPrivateKey',          'ACCOUNT_DEVELOPMENT_PRIVATE_KEY' ],
+                [ 'clientProviderUrl',         'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+            ],
+            'allowedPaymentOptions': [
+                { 
+                    'name': 'USDC',
+                    'tokenAddress': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                    'decimals': 6,
+                    'maxAmountRequired': '0.01' 
+                }
+            ]
+        }
+    }
+}
+const chainId = '84532'
+const envPath = './../../.env'
+
+// 1️⃣ Prepare Environment
+const serverCredentials = {
+  payTo1: '0xxyz',
+  serverProviderUrl: 'https://...'
+}
+const clientCredentials = {
+  clientProviderUrl: 'https://...'
+}
+
+
+// 2️⃣ Server static paymentRequirementsPayload
+const { chainName, contracts, paymentOptions, activePaymentOptions } = cfg['server'][ chainId ]
+const { preparedPaymentOptions } = ServerExact
+    .getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials } )
+const { paymentRequirementsPayload } = ServerExact
+    .getPaymentRequirementsPayload( { chainId, chainName, preparedPaymentOptions, contracts, resource: '' } )
+
+// 3️⃣ Client initialize
+const { allowedPaymentOptions } = cfg['client'][ chainId ]
+const { paymentOption } = ClientExact
+    .selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } ) 
+
+
+================================================
+FILE: .github/workflows/test-on-release.yml
+================================================
+name: Node Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run plain test
+        run: node .github/test-on-release.mjs
+
+

@@ -1,0 +1,35 @@
+{
+  "name": "backendshield",
+  "version": "0.1.0",
+  "description": "Credit-based micropayments eliminate payment friction while encrypting transaction amounts and provider earnings on-chain",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node --watch index.js",
+    "start": "node index.js"
+  },
+  "keywords": [
+    "x402",
+    "eerc20",
+    "mcp",
+    "privacy",
+    "micropayments",
+    "blockchain",
+    "avalanche",
+    "hack2build"
+  ],
+  "author": "a6b8",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a6b8/backendshield.git"
+  },
+  "bugs": {
+    "url": "https://github.com/a6b8/backendshield/issues"
+  },
+  "homepage": "https://community.flowmcp.org/backendshield"
+}

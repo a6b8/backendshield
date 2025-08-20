@@ -1,0 +1,13 @@
+Prepare Your 1st Submission – Due This Saturday
+Your Stage 1 submission is about showing us where you're headed — not perfection. Focus on clarity, structure, and potential.
+Here’s what you’ll need to submit on the Builder Hub:
+GitHub Repo
+Add your code repo to the “GitHub Link” field.
+Roadmap + Supporting Material
+In the “Demo and Other Links” section:
+Upload your roadmap (Google Doc, PDF, Notion — any clear format is fine)
+Include any extra links: demo, pitch decks, mockups, architecture diagrams, or any other support document.
+Make sure the privacy of all the links is set to public.
+🕒 Deadline:
+Saturday, August 23 at 11:59 PM ET
+💡 This stage is about direction and execution. Think: What problem are you solving? What’s your approach? What are your next steps?

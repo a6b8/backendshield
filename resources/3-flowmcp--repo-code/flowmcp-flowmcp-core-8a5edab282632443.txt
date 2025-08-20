@@ -1,0 +1,3665 @@
+Directory structure:
+└── flowmcp-flowmcp-core/
+    ├── README.md
+    ├── jest.config.mjs
+    ├── LICENSE
+    ├── package.json
+    ├── spec/
+    │   ├── v.1.2.2-spec.md
+    │   ├── v1.0.0-spec.md
+    │   └── v1.2.0-spec.md
+    ├── src/
+    │   ├── index.mjs
+    │   └── task/
+    │       ├── Fetch.mjs
+    │       ├── Interface.mjs
+    │       ├── Payload.mjs
+    │       ├── Test.mjs
+    │       └── Validation.mjs
+    ├── tests/
+    │   ├── ci/
+    │   │   └── circle-ci.mjs
+    │   ├── fetch/
+    │   │   ├── fetch-all-routes.mjs
+    │   │   ├── fetch-all-schemas-wEnv.mjs
+    │   │   ├── fetch-all-schemas-woEnv.mjs
+    │   │   └── helpers/
+    │   │       └── Print.mjs
+    │   ├── others/
+    │   │   ├── filter-array-of-schemas.mjs
+    │   │   ├── filter-array-of-schemas.test.mjs
+    │   │   ├── validate-schema.mjs
+    │   │   ├── validate-schema.test.mjs
+    │   │   ├── zod-interface.test.mjs
+    │   │   └── zod-interfaces.mjs
+    │   └── server/
+    │       ├── local-server-module.mjs
+    │       ├── local-server-plain.mjs
+    │       └── remote-server.mjs
+    └── .github/
+        └── workflows/
+            └── test-on-release.yml
+
+================================================
+FILE: README.md
+================================================
+# FlowMCP (Core)
+
+**FlowMCP** is a schema-based framework that bridges existing web APIs (e.g., REST or GraphQL) with AI systems. It standardizes interaction using a universal format called the **Model Context Protocol (MCP)**.
+
+---
+
+## ✨ Purpose
+
+FlowMCP abstracts complex APIs into clean, structured schema definitions, enabling seamless AI-driven communication with external services. These schemas eliminate ambiguity and ensure compatibility through versioned contracts.
+
+---
+
+## 🔧 Core Features
+
+* **Schema-Based Integration** – Each route is described in a structured schema that AI systems can interpret.
+* **Modifier System** – Pre-, post-, and execute-phase handlers enable transformation and logic injection.
+* **Inline Parameters with Zod Validation** – Parameters use inline formatting with built-in type enforcement.
+* **Test Coverage** – Each route supports embedded test cases to verify real-world API interactions.
+* **Text-Based Output** – Results are returned in clear, human-readable format.
+
+---
+
+## 📐 Schema Format
+
+Each schema must export a single `const schema = {}` object from a `.mjs` file with the following keys:
+
+| Key                    | Description                                                                 |
+|------------------------|-----------------------------------------------------------------------------|
+| `namespace`            | Short unique name using only ASCII letters (`/^[a-zA-Z]+$/`)                |
+| `name`                 | Human-readable display name                                                 |
+| `description`          | Summary of schema functionality                                             |
+| `docs`                 | List of reference documentation URLs                                        |
+| `tags`                 | Array of activation tags (e.g., `group.route`, `group.!route`)              |
+| `flowMCP`              | Version string (`"1.2.0"` or `"1.2.2"`)                                     |
+| `root`                 | API root URL, can include variable placeholders                             |
+| `requiredServerParams` | Environment variables used in headers, root, or parameters                  |
+| `headers`              | Key-value HTTP headers with optional variable substitution (`{{...}}`)      |
+| `routes`               | API route definitions                                                       |
+| `handlers`             | Async modifier functions for preprocessing or response handling             |
+
+---
+
+## 🧭 Route Definition
+
+Each route under `routes` must define:
+
+* `requestMethod`: `"GET"` or `"POST"`
+* `description`: Summary of the endpoint
+* `route`: URL path with optional placeholders (e.g., `/item/:id`)
+* `parameters`: Input list, defined inline
+* `tests`: Array of input samples with `_description`
+* `modifiers`: Required array with `phase` and `handlerName`. If not in use set to []
+
+---
+
+## 🧩 Parameter Format (1.2.2-compliant)
+
+Each parameter entry must be **single-line**, following this exact layout:
+
+```javascript
+{ position: { key: "id", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: ["length(24)"] } }
+````
+
+### Accepted `z.primitive` values:
+
+* `string()`
+* `number()`
+* `boolean()`
+* `enum(...)`
+
+### Accepted `z.options` values:
+
+* `length(n)`
+* `min(n)`, `max(n)`
+* `regex(pattern)`
+* `optional()`
+* `default(value)`
+
+> 🛑 **Multiline parameters are not valid** in version 1.2.2.
+
+---
+
+## 🧪 Test Cases
+
+Each route should include:
+
+```javascript
+tests: [
+    { _description: "Sample test", id: "abc123xyz456789def000000" }
+]
+```
+
+* `_description` is required
+* Only declared parameter keys are allowed
+* All fields must match schema structure
+
+---
+
+## 🔁 Modifiers
+
+Use modifiers for pre/post processing or custom execution:
+
+```javascript
+modifiers: [
+    { phase: "pre", handlerName: "prepareQuery" },
+    { phase: "post", handlerName: "transformOutput" },
+    { phase: "execute", handlerName: "customFetcher" }
+]
+```
+
+* Phases: `"pre"`, `"post"`, `"execute"`
+* Each handler must exist in `handlers` block
+
+---
+
+## ⚙️ Handlers
+
+Example handler definition:
+
+```javascript
+handlers: {
+    normalizeResult: async ({ struct, payload }) => {
+        if (!struct.data?.result) {
+            struct.status = false;
+            struct.messages.push("Missing result data");
+        } else {
+            struct.data = struct.data.result;
+        }
+        return { struct, payload };
+    }
+}
+```
+
+---
+
+## 🧩 Activation & Server
+
+Schemas are activated via FlowMCP server tools:
+
+```javascript
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { FlowMCP } from 'flowMCP'
+import { schema } from './schema.mjs'
+
+const server = new McpServer({
+    name: 'Schema Tester',
+    description: 'Local server for schema testing',
+    version: '1.2.2'
+})
+
+FlowMCP.activateServerTools({
+    server,
+    schema,
+    serverParams: { API_KEY: 'abc123' }
+})
+
+await server.connect(new StdioServerTransport())
+```
+
+---
+
+## 🧪 FlowMCP Exposed API (index.mjs)
+
+From the root module:
+
+* `FlowMCP.activateServerTools(...)`
+* `FlowMCP.getAllTests(...)`
+* `FlowMCP.fetch(...)`
+* `FlowMCP.validateSchema(...)`
+* `FlowMCP.prepareActivations(...)`
+* `FlowMCP.getArgvParameters(...)`
+
+---
+
+## 📎 Formatting Rules
+
+* Always use **4-space indentation**
+* Parameters and modifiers must be one-liners
+* Leave **two blank lines** before `export { schema };`
+* Declare constants (e.g. enums, helper mappings) above the schema
+
+---
+
+## 📚 Schema Library
+
+Explore curated schemas on GitHub: [flowMCP/flowMCP-schemas](https://github.com/flowMCP/flowMCP-schemas)
+
+This community-driven repository contains more than **60+ production-ready FlowMCP schemas** from major data providers like:
+
+* `chainlink`
+* `luksoNetwork`
+* `coingecko`
+* `poap`
+* `solanatracker`
+* `etherscan`, `dexscreener`, `moralis`, and more...
+
+You can import any schema directly into your project as shown:
+
+```js
+import { schema } from './schemas/chainlink/getLatestPrices.mjs'
+```
+
+---
+
+## ⚒️ Schema Generator Tool
+
+Need a new schema? You can generate FlowMCP-compliant schemas automatically using the AI-based generator:
+
+👉 [Open Schema Generator in ChatGPT](https://chatgpt.com/g/g-68066f63ac3c8191aa790ef47f100015-flowmcp-schema-generator-1-2-2)
+
+Just describe the API behavior in plain English, and the tool will produce a valid `.mjs` schema file ready to use with FlowMCP.
+
+---
+
+## 📄 License & Contributions
+
+Contributions are welcome via PRs. Follow the schema rules strictly and ensure your changes pass FlowMCP validation.
+
+---
+
+## 📌 Version
+
+**This README is written for FlowMCP schema specification version `1.2.2`.**
+
+
+================================================
+FILE: jest.config.mjs
+================================================
+// jest.config.js
+export default {
+    testEnvironment: 'node',
+    transform: {},
+    verbose: true,
+    roots: [ './tests' ]
+}
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+Copyright (c) 2025 αηdr3α5 ɮαηɦօlʐ3ʀ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+FILE: package.json
+================================================
+{
+  "name": "flowmcp-core",
+  "version": "1.3.0",
+  "description": "FlowMCP is a framework for adapting existing web APIs into a standardized Model Context Protocol (MCP) interface, enabling structured, testable, and semantically consistent access for AI systems.",
+  "main": "./src/index.mjs",
+  "directories": {
+    "test": "tests"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "NODE_OPTIONS='--experimental-vm-modules' npx jest --detectOpenHandles",
+    "inspector": "npx @modelcontextprotocol/inspector"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "axios": "^1.8.4",
+    "flatted": "^3.3.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.13.0",
+    "flowmcpServers": "github:flowmcp/flowMCP-servers#0c3c15d41ded418ad70d84d0ee267009e262af29",
+    "schemaimporter": "github:flowmcp/flowMCP-schemas#3d378b3a61452126c833d667a9189ca578813c48",
+    "jest": "^30.0.3"
+  }
+}
+
+
+
+================================================
+FILE: spec/v.1.2.2-spec.md
+================================================
+# 🌐 FlowMCP – Technical Standard (Version 1.2.2)
+
+## 1. Purpose
+
+**FlowMCP** provides a standardized, AI-friendly format for describing and interacting with existing APIs. Its goal is to enable automated integration of REST-like interfaces through clearly structured schemas that minimize ambiguity and maximize robustness.
+
+---
+
+## 2. Schema Structure
+
+```javascript
+const schema = {
+    namespace: "exampleNamespace",
+    name: "Example API",
+    description: "Brief explanation of the API",
+    docs: ["https://example.com/docs"],
+    tags: ["production", "exampleapi.getObject"],
+    flowMCP: "1.2.0",
+    root: "https://api.example.com",
+    requiredServerParams: ["API_KEY"],
+    headers: { Authorization: "Bearer {{API_KEY}}" },
+    routes: {},
+    handlers: {}
+};
+
+export { schema };
+````
+
+---
+
+## 3. General Validation Rules
+
+| Field                    | Requirement                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `namespace`              | Must be non-empty string; letters only (`/^[a-zA-Z]+$/`)                                                     |
+| `flowMCP`                | Must be in `"x.x.x"` format, e.g. `"1.2.0"`                                                                  |
+| `root`                   | Must be a valid URL; placeholders like `{{API_KEY}}` are allowed                                             |
+| `requiredServerParams`   | Must include all placeholders used in `root`, `headers`, and `parameters.value` (excluding `{{USER_PARAM}}`) |
+| `tags`                   | Format: `"module.route"` or `"module.!route"` using letters and dots only                                    |                                                             |
+
+---
+
+## 4. Route Structure
+
+```javascript
+routes: {
+    getExample: {
+        requestMethod: "GET",
+        description: "Example route",
+        route: "/example/:id",
+        parameters: [ /* see parameter formatting */ ],
+        tests: [ /* see test rules */ ],
+        modifiers: [ /* optional */ ]
+    }
+}
+```
+
+All keys (requestMethod, description, route, parameters, tests and modifiers) MUST be declared. If for example modifiers is not in use, set modifiers to modifiers: []
+
+---
+
+## 5. 📌 Parameter Formatting (Single Line)
+
+**Each parameter must be written on a single line** to ensure readability and support for inline comments. This format is a strict convention in FlowMCP.
+
+### ✅ **Correct:**
+
+```javascript
+parameters: [
+    { position: { key: "id", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: ["length(24)"] } }
+]
+```
+
+### ❌ **Incorrect:**
+
+```javascript
+parameters: [
+    {
+        position: {
+            key: "id",
+            value: "{{USER_PARAM}}",
+            location: "insert"
+        },
+        z: {
+            primitive: "string()",
+            options: ["length(24)"]
+        }
+    }
+]
+```
+
+> 🔹 Every parameter using `{{USER_PARAM}}` **must** include a valid `z` object with `primitive` and `options`.
+
+
+---
+
+## 6. Options for `z.options`
+
+| Option       | Meaning                        |
+| ------------ | ------------------------------ |
+| `length(n)`  | Must be exactly `n` characters |
+| `min(n)`     | Minimum numeric value          |
+| `max(n)`     | Maximum numeric value          |
+| `regex(x)`   | Must match regex pattern       |
+| `optional()` | Parameter is optional          |
+| `default(x)` | Default value if missing       |
+
+---
+
+## 7. Modifiers
+
+```javascript
+modifiers: [
+    { phase: "pre", handlerName: "modifyInput" },
+    { phase: "post", handlerName: "normalizeResult" }
+]
+```
+
+* Valid `phase` values: `pre`, `execute`, `post`
+* Each `handlerName` must match a function in the `handlers` block.
+
+---
+
+## 8. Handlers
+
+```javascript
+handlers: {
+    normalizeResult: async ({ struct, payload }) => {
+        if (!struct.data?.result) {
+            struct.status = false;
+            struct.messages.push("Missing result data");
+        } else {
+            struct.data = struct.data.result;
+        }
+        return { struct, payload };
+    }
+}
+```
+
+---
+
+## 9. Tests
+
+```javascript
+tests: [
+    { _description: "Test with valid ID", id: "abc123def456ghi789xyz012" }
+]
+```
+
+* Only valid field names (as per parameters) are allowed.
+* `_description` is required.
+* Unknown or undefined fields are not permitted.
+
+---
+
+## 10. Complete Example Schema
+
+```javascript
+const schema = {
+    namespace: "exampleapi",
+    name: "Example API",
+    description: "Returns example data for a given object",
+    docs: ["https://example.com/docs"],
+    tags: ["production", "exampleapi.getObject"],
+    flowMCP: "1.2.0",
+    root: "https://api.example.com/v1",
+    requiredServerParams: ["API_KEY"],
+    headers: { Authorization: "Bearer {{API_KEY}}" },
+    routes: {
+        getObject: {
+            requestMethod: "GET",
+            description: "Retrieves an object by ID",
+            route: "/objects/:id",
+            parameters: [
+                { position: { key: "id", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: ["length(24)"] } }
+            ],
+            tests: [
+                { _description: "Test with ID", id: "1234567890abcdef12345678" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "normalizeObject" }
+            ]
+        }
+    },
+    handlers: {
+        normalizeObject: async ({ struct, payload }) => {
+            if (struct.data?.object) {
+                struct.data = struct.data.object;
+            } else {
+                struct.status = false;
+                struct.messages.push("Missing object data");
+            }
+            return { struct, payload };
+        }
+    }
+};
+
+export { schema };
+```
+
+
+================================================
+FILE: spec/v1.0.0-spec.md
+================================================
+# Generalized Schema Spec v1.0.0
+
+## Meta
+- **name** *(string, required)*: Name of the schema (e.g., "Etherscan")
+- **description** *(string, required)*: Brief description of the schema's purpose
+- **version** *(string, required)*: Semantic versioning (format: x.x.x)
+- **flowMCP** *(string, required)*: Spec version compliance, must match the current Spec version
+- **root** *(string, required)*: Base URL for API endpoints
+- **requiredServerParams** *(array of strings, required)*: List of required server parameters (secrets)
+- **headers** *(object, required)*: Key-value pairs for request headers, e.g., `{'apiKey': 'Bearer {{MY_SECRET}}'}`
+- **routes** *(object of objects, required)*: Collection of API route definitions
+- **handlers** *(object, required)*: Key-function pairs used for post-processing or handling responses
+
+## Route
+Each route object consists of:
+- **requestMethod** *(string, required)*: HTTP method, choose from [GET, POST]
+- **description** *(string, required)*: Explanation of the route functionality
+- **route** *(string, required)*: API route path (supports parameter inserts, e.g., `/api/:address/tx`)
+- **parameters** *(array of objects, required)*: Request parameters
+- **tests** *(array of objects, required)*: Test cases to validate the route
+- **modifiers** *(array of objects, optional)*: Post-processing steps, each modifier containing:
+  - **phase** *(string, required)*: Phase of modification (currently supported: `post`)
+  - **handlerName** *(string, required)*: Reference to a handler function defined in handlers
+
+## Parameters
+Each parameter object consists of:
+- **position** *(object, required)*:
+  - **key** *(string, required)*: Parameter name
+  - **value** *(string, required)*: Parameter value, can be static or `{{USER_PARAM}}` if user input is expected
+  - **location** *(string, required)*: Parameter location, choose from [`body`, `query`, `insert`]
+- **z** *(object, required if value is `{{USER_PARAM}}`)*:
+  - **primitive** *(string, required)*: Data type, choose from [`string()`, `number()`, `boolean()`, `object()`]
+  - **options** *(array of strings, optional)*: Additional validation options:
+    - `min(value)`
+    - `max(value)`
+    - `length(value)`
+    - `enum(value1,value2,...)`
+    - `regex(pattern)`
+    - `optional()`
+    - `default(value)`
+
+## Z Object
+- **primitive** *(string, required)*: Defines the type, from the available primitives (`string()`, `number()`, `boolean()`, `object()`)
+- **options** *(array of strings)*: Validation constraints. Include parentheses when passing arguments.
+
+## User Params
+- Parameters marked as `{{USER_PARAM}}` are required unless explicitly marked with the `optional()` option.
+
+## Modifiers
+- Each route response may pass through one or more modifiers for additional processing
+- Modifiers reference handlers by `handlerName`
+
+## Required Server Params
+- Secrets or sensitive configurations needed at runtime
+- These are explicitly listed and validated
+
+## Headers
+- One-dimensional object with key-value pairs, injecting secrets via serverParams
+- Example: `{ 'apiKey': 'Bearer {{MY_SECRET}}' }`
+
+## Schema File
+- Must be a `.mjs` file exporting the schema object:
+```javascript
+export { schema };
+```
+
+### Example of Route Definition
+```javascript
+routes: {
+  exampleRoute: {
+    requestMethod: "GET",
+    description: "Fetch example data",
+    route: "/api/:example",
+    parameters: [
+      { position: { key: "example", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string", options: ["min(3)", "max(10)"] } },
+    ],
+    tests: [
+      { _description: "Test for exampleRoute", example: "sampleValue" }
+    ],
+    modifiers: [
+      { phase: "post", handlerName: "modifyExample" }
+    ]
+  }
+},
+handlers: {
+  modifyExample: async ({ struct, payload }) => {
+    struct.data = payload.result;
+    return { struct, payload };
+  }
+}
+```
+
+
+================================================
+FILE: spec/v1.2.0-spec.md
+================================================
+# FlowMCP – Documentation
+
+## Purpose
+
+FlowMCP enables the modification of existing internet interfaces (e.g., REST APIs) so that an artificial intelligence (AI) can easily access them via a standardized MCP interface.
+
+---
+
+## Core Features
+
+* **Schema-based integration**:
+
+  * Each API route is schema-based and includes AI-friendly parameters for improved semantic understanding.
+
+* **Modifiers for data processing**:
+
+  * Modify database queries and outputs using pre- and post-processing modifiers.
+  * Support for custom, specialized queries.
+
+* **Testing support**:
+
+  * Automated tests for rapid validation of individual routes.
+
+* **Text-based output**:
+
+  * Readable text output for AI with detailed error messages.
+
+---
+
+## Schema Validation and Specification
+
+* **Required Schema**:
+
+  * Every API must have a validated schema for integration.
+
+* **Specification**:
+
+  * Technical specifications are located in `./spec/v...`.
+  * Serves as a template for AI-generated schemas.
+
+---
+
+## Schema Structure
+
+A schema fulfills two main goals:
+
+1. Quick user overview through descriptive keys.
+2. Minimal friction for AI through consistent structuring.
+
+### Basic Structure
+
+```javascript
+const schema = {
+    namespace: "",
+    name: "",
+    description: "",
+    docs: [""],
+    tags: [""],
+    flowMCP: "",
+    root: "",
+    requiredServerParams: [""],
+    headers: {},
+    routes: {},
+    handlers: {}
+};
+
+export { schema };
+```
+
+* **File format**: `.mjs`
+* **Indentation**: 4 spaces
+
+---
+
+## Modifiers and Handlers
+
+### Modifiers
+
+Modifiers allow specific adjustments in three phases:
+
+* **pre**: Before the API query is executed.
+* **post**: After the API query, to adjust the received data.
+* **execute**: Completely overrides the default execution, ideal for custom queries.
+
+```javascript
+modifiers: [
+    { phase: "pre", handlerName: "modifyQuery" },
+    { phase: "post", handlerName: "modifyResult" },
+    { phase: "execute", handlerName: "customExecution" }
+]
+```
+
+### Handlers
+
+Handlers are asynchronous JavaScript functions executed during the modifier phases.
+
+```javascript
+handlers: {
+    modifyQuery: async ({ struct, payload, userParams, routeName, phaseType }) => {
+        payload.url = payload.url.replace("--chain--", userParams.chain);
+        return { struct, payload };
+    },
+    modifyResult: async ({ struct, payload }) => {
+        struct.data = struct.data.result;
+        return { struct, payload };
+    },
+    customExecution: async ({ struct, payload }) => {
+        // Custom API execution
+        return { struct, payload };
+    }
+}
+```
+
+---
+
+## Formatting
+
+* Always use 4-space indentation.
+* Parameter, modifier, and test objects should always be written on a single line to maintain clarity and enable easy commenting.
+
+Example:
+
+```javascript
+tests: [
+    { _description: "Test tokenStatsByPool", token: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump", pool: "9Tb2ohu5P16BpBarqd3N27WnkF51Ukfs8Z1GzzLDxVZW" },
+    // Additional test objects
+]
+```
+
+* Insert two blank lines between the schema definition and its export.
+* Define additional variables above the schema.
+
+```javascript
+const variable = "value";
+
+
+const schema = {
+    // schema definition
+};
+
+
+export { schema };
+```
+
+---
+
+## Activating a Schema
+
+```javascript
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { FlowMCP } from 'flowMCP';
+import { schema } from './path/schema.mjs';
+
+const server = new McpServer({
+    name: 'Test Server',
+    description: 'Development Server',
+    version: '1.2.0'
+});
+
+const serverParams = { API_KEY: "your-api-key" };
+FlowMCP.activateServerTools({ server, schema, serverParams });
+
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+
+# FlowMCP – Patterns für effektive Schema-Umsetzung
+
+Um APIs möglichst reibungslos und effizient mit FlowMCP umzusetzen, empfiehlt es sich, bewährte Patterns und Best Practices zu verwenden. Im Folgenden werden Muster erläutert, wie ein Schema optimal strukturiert und implementiert werden kann.
+
+---
+
+## 1. Namensgebung und Struktur
+
+### Namespace
+
+Verwende eindeutige, kurze und klare Namespaces, um Überschneidungen zu vermeiden.
+
+**Beispiel:**
+
+```javascript
+namespace: "etherscan"
+```
+
+### Routen-Benennung
+
+Routen immer aussagekräftig im CamelCase benennen, sodass Zweck und Kontext schnell klar sind.
+
+**Beispiel:**
+
+```javascript
+routes: {
+    getAccountBalance: { /* ... */ }
+}
+```
+
+---
+
+## 2. KI-freundliche Parameter
+
+Stelle sicher, dass Parameter semantisch eindeutig und für KI leicht verständlich sind.
+
+**Beispiel:**
+
+```javascript
+parameters: [
+    { position: { key: "accountAddress", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: ["length(42)"] } }
+]
+```
+
+---
+
+## 3. Verwendung von Tags
+
+Nutze Tags strategisch, um Schemata flexibel zu filtern oder bestimmte Routen gezielt einzuschließen/auszuschließen.
+
+**Beispiel:**
+
+```javascript
+tags: ["production", "evm.getAccountBalance"]
+```
+
+---
+
+## 4. Sinnvoller Einsatz von Modifiers
+
+Modifiers gezielt einsetzen, um spezifische Anforderungen einfach umzusetzen.
+
+### Pre-Modifier
+
+Vor der API-Abfrage Parameter oder URL dynamisch anpassen.
+
+**Beispiel:**
+
+```javascript
+modifiers: [
+    { phase: "pre", handlerName: "adjustQueryParams" }
+]
+```
+
+### Post-Modifier
+
+Ergebnisse nach der API-Abfrage sinnvoll anpassen.
+
+**Beispiel:**
+
+```javascript
+modifiers: [
+    { phase: "post", handlerName: "formatApiResponse" }
+]
+```
+
+---
+
+## 5. Handler-Implementierung
+
+Handler-Funktionen einfach und robust halten. Fehler immer klar kommunizieren und strukturiert behandeln.
+
+**Beispiel:**
+
+```javascript
+handlers: {
+    formatApiResponse: async ({ struct, payload }) => {
+        if (!struct.data || !struct.data.result) {
+            struct.status = false;
+            struct.messages.push("Fehlerhafte API-Daten");
+            return { struct, payload };
+        }
+
+        struct.data = struct.data.result;
+        return { struct, payload };
+    }
+}
+```
+
+---
+
+## 6. Automatisierte Tests effektiv nutzen
+
+Implementiere Tests, die schnell und präzise sind. Beschreibe kurz und klar, was getestet wird.
+
+**Beispiel:**
+
+```javascript
+tests: [
+    { _description: "Test Ethereum Mainnet Account Balance", accountAddress: "0xabc123456789abcdef123456789abcdef1234567" }
+]
+```
+
+---
+
+## 7. Formatierung als Schlüssel zur Übersichtlichkeit
+
+Halte Parameter-, Modifier- und Test-Objekte jeweils in einer Zeile, um Kommentare einfach einfügen zu können.
+
+**Beispiel:**
+
+```javascript
+tests: [
+    { _description: "Balance-Test", accountAddress: "0x123456789abcdef123456789abcdef1234567890" },
+    // weitere Tests
+]
+```
+
+---
+
+## 8. Nutzung von Umgebungsvariablen
+
+Setze Umgebungsvariablen sinnvoll und sicher ein.
+
+**Beispiel:**
+
+```javascript
+requiredServerParams: ["API_KEY"],
+headers: {
+    Authorization: "Bearer {{API_KEY}}"
+}
+```
+
+---
+
+## Vollständiges Schema-Beispiel
+
+(Siehe bisheriges einfaches Schema-Beispiel im vorherigen Abschnitt.)
+
+---
+
+## Komplexes Schema-Beispiel (mit Modifier und Handler)
+
+```javascript
+const schema = {
+    namespace: "chainlink",
+    name: "Chainlink Preise",
+    description: "Preisfeeds von Chainlink für verschiedene Assets",
+    docs: ["https://docs.chain.link/data-feeds"],
+    tags: ["production", "chainlink.prices"],
+    flowMCP: "1.2.0",
+    root: "https://data.chain.link",
+    requiredServerParams: ["CHAINLINK_API_KEY"],
+    headers: { Authorization: "Bearer {{CHAINLINK_API_KEY}}" },
+    routes: {
+        getAssetPrice: {
+            requestMethod: "GET",
+            description: "Abrufen des aktuellen Preises eines Assets",
+            route: "/v1/prices/:assetSymbol",
+            parameters: [
+                { position: { key: "assetSymbol", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: [] } }
+            ],
+            tests: [
+                { _description: "Preis von ETH", assetSymbol: "ETH" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "normalizePriceData" }
+            ]
+        }
+    },
+    handlers: {
+        normalizePriceData: async ({ struct, payload }) => {
+            if (struct.data && struct.data.price) {
+                struct.data = { asset: payload.url.split('/').pop(), price: struct.data.price };
+            } else {
+                struct.status = false;
+                struct.messages.push("Fehlender Preis in API-Antwort");
+            }
+            return { struct, payload };
+        }
+    }
+};
+
+export { schema };
+```
+
+
+# FlowMCP – Patterns for Effective Schema Implementation
+
+To implement APIs smoothly and efficiently with FlowMCP, it’s recommended to follow proven patterns and best practices. Below are guidelines on how to optimally structure and implement a schema.
+
+---
+
+## 1. Naming and Structure
+
+### Namespace
+
+Use clear, short, and unique namespaces to avoid conflicts.
+
+**Example:**
+
+```javascript
+namespace: "etherscan"
+```
+
+### Route Naming
+
+Always name routes in descriptive CamelCase so their purpose and context are immediately clear.
+
+**Example:**
+
+```javascript
+routes: {
+    getAccountBalance: { /* ... */ }
+}
+```
+
+---
+
+## 2. AI-Friendly Parameters
+
+Ensure that parameters are semantically clear and easy for AI to understand.
+
+**Example:**
+
+```javascript
+parameters: [
+    { position: { key: "accountAddress", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: ["length(42)"] } }
+]
+```
+
+---
+
+## 3. Use of Tags
+
+Use tags strategically to flexibly filter schemas or to explicitly include/exclude specific routes.
+
+**Example:**
+
+```javascript
+tags: ["production", "evm.getAccountBalance"]
+```
+
+---
+
+## 4. Meaningful Use of Modifiers
+
+Use modifiers purposefully to implement specific requirements with ease.
+
+### Pre-Modifier
+
+Adjust parameters or the URL dynamically before the API request.
+
+**Example:**
+
+```javascript
+modifiers: [
+    { phase: "pre", handlerName: "adjustQueryParams" }
+]
+```
+
+### Post-Modifier
+
+Refine the results meaningfully after the API request.
+
+**Example:**
+
+```javascript
+modifiers: [
+    { phase: "post", handlerName: "formatApiResponse" }
+]
+```
+
+---
+
+## 5. Handler Implementation
+
+Keep handler functions simple and robust. Always communicate errors clearly and handle them in a structured way.
+
+**Example:**
+
+```javascript
+handlers: {
+    formatApiResponse: async ({ struct, payload }) => {
+        if (!struct.data || !struct.data.result) {
+            struct.status = false;
+            struct.messages.push("Invalid API response data");
+            return { struct, payload };
+        }
+
+        struct.data = struct.data.result;
+        return { struct, payload };
+    }
+}
+```
+
+---
+
+## 6. Effective Use of Automated Tests
+
+Implement tests that are fast and precise. Clearly and briefly describe what is being tested.
+
+**Example:**
+
+```javascript
+tests: [
+    { _description: "Test Ethereum Mainnet Account Balance", accountAddress: "0xabc123456789abcdef123456789abcdef1234567" }
+]
+```
+
+---
+
+## 7. Formatting as a Key to Clarity
+
+Keep parameter, modifier, and test objects on a single line for easier readability and to simplify commenting.
+
+**Example:**
+
+```javascript
+tests: [
+    { _description: "Balance test", accountAddress: "0x123456789abcdef123456789abcdef1234567890" },
+    // more tests
+]
+```
+
+---
+
+## 8. Use of Environment Variables
+
+Use environment variables wisely and securely.
+
+**Example:**
+
+```javascript
+requiredServerParams: ["API_KEY"],
+headers: {
+    Authorization: "Bearer {{API_KEY}}"
+}
+```
+
+---
+
+## Complete Schema Example
+
+(See the simple schema example in the previous section.)
+
+---
+
+## Complex Schema Example (with Modifiers and Handlers)
+
+```javascript
+const schema = {
+    namespace: "chainlink",
+    name: "Chainlink Prices",
+    description: "Chainlink price feeds for various assets",
+    docs: ["https://docs.chain.link/data-feeds"],
+    tags: ["production", "chainlink.prices"],
+    flowMCP: "1.2.0",
+    root: "https://data.chain.link",
+    requiredServerParams: ["CHAINLINK_API_KEY"],
+    headers: { Authorization: "Bearer {{CHAINLINK_API_KEY}}" },
+    routes: {
+        getAssetPrice: {
+            requestMethod: "GET",
+            description: "Fetch the current price of an asset",
+            route: "/v1/prices/:assetSymbol",
+            parameters: [
+                { position: { key: "assetSymbol", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: [] } }
+            ],
+            tests: [
+                { _description: "Price of ETH", assetSymbol: "ETH" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "normalizePriceData" }
+            ]
+        }
+    },
+    handlers: {
+        normalizePriceData: async ({ struct, payload }) => {
+            if (struct.data && struct.data.price) {
+                struct.data = { asset: payload.url.split('/').pop(), price: struct.data.price };
+            } else {
+                struct.status = false;
+                struct.messages.push("Missing price in API response");
+            }
+            return { struct, payload };
+        }
+    }
+};
+
+export { schema };
+```
+
+
+================================================
+FILE: src/index.mjs
+================================================
+import { Interface } from './task/Interface.mjs'
+import { Validation } from './task/Validation.mjs'
+import { Fetch } from './task/Fetch.mjs'
+import { Payload } from './task/Payload.mjs'
+import { Test } from './task/Test.mjs'
+
+// import { LocalServer } from './servers/LocalServer.mjs'
+// import { RemoteServer } from './servers/RemoteServer.mjs'
+
+
+class FlowMCP {
+    static getArgvParameters( {
+        argv,
+        includeNamespaces = [],
+        excludeNamespaces = [],
+        activateTags = []
+    } ) {        
+        const result = {
+            'source': 'unknown',
+            includeNamespaces,
+            excludeNamespaces,
+            activateTags
+        }
+        
+        const argMappings = {
+            '--source': 'source',
+            '--includeNamespaces=': 'includeNamespaces',
+            '--excludeNamespaces=': 'excludeNamespaces',
+            '--activateTags=': 'activateTags'
+        }
+        
+        const args = process.argv.slice( 2 )
+        args
+            .forEach( ( arg ) => {
+                Object
+                    .entries( argMappings )
+                    .forEach( ( [ prefix, key ] ) => {
+                        if( arg.startsWith( prefix ) ) {
+                            const [ _, value ] = arg.split( '=' )
+                            result[ key ] = value.split( ',' ).filter( Boolean )
+                        }
+                    } )
+            } )
+
+        if( Array.isArray( result['source'] ) ) {
+            result['source'] = result['source'][ 0 ]
+        }
+
+        return result
+    }
+
+
+    static prepareActivations( { 
+        arrayOfSchemas, 
+        envObject, 
+        activateTags,  // deprecated use filterArrayOfSchemas instead
+        includeNamespaces, // deprecated use filterArrayOfSchemas instead
+        excludeNamespaces // deprecated use filterArrayOfSchemas instead
+    } ) {
+        Validation.prepareActivations( { arrayOfSchemas, envObject, activateTags, includeNamespaces, excludeNamespaces } )
+
+        const { status, messages, activationPayloads } = Payload
+            .prepareActivations( { arrayOfSchemas, envObject } )
+        if( !status ) { 
+            throw new Error( `Activation preparation failed: ${messages.join( ', ' )}` ) 
+        }
+
+        return { activationPayloads }
+    }
+
+
+    static filterArrayOfSchemas( { arrayOfSchemas, includeNamespaces, excludeNamespaces, activateTags } ) {
+        Validation.filterArrayOfSchemas( { arrayOfSchemas, includeNamespaces, excludeNamespaces, activateTags } )
+
+        const filteredByNamespaces = arrayOfSchemas
+            .filter( ( schema ) => {
+                const { namespace } = schema
+                if( includeNamespaces.length > 0 ) {
+                    return includeNamespaces.includes( namespace )
+                } else if( excludeNamespaces.length > 0 ) {
+                    return !excludeNamespaces.includes( namespace )
+                } else {
+                    return true
+                }
+            } )
+// console.log( 'A', 'Schemas', filteredByNamespaces.length, '                                   Routes', filteredByNamespaces.reduce( (acc, s ) => { acc += Object.keys( s.routes ).length; return acc }, 0 ) )
+
+        const { filterTags, schemaFilters } = activateTags
+            .reduce( ( acc, tag ) => {
+                if( !tag.includes( '.' ) ) {
+                    acc['filterTags' ].push( tag.toLowerCase() )
+                    return acc
+                } else {
+                    const [ namespace, routeNameCmd ] = tag.split( '.' )
+                    if( !Object.hasOwn( acc['schemaFilters'], namespace ) ) {
+                        acc['schemaFilters'][ namespace ] = []
+                    }
+                    acc['schemaFilters'][ namespace ].push( routeNameCmd.toLowerCase() )
+                }
+                return acc
+            }, { 'filterTags': [], 'schemaFilters': {} } )
+// console.log( 'B', 'FilterTags', filterTags.length, 'SchemaFilters', Object.keys( schemaFilters ).length )
+
+        const filteredByNamespaceAndTags = filteredByNamespaces
+            .filter( ( schema ) => {
+                if( filterTags.length === 0 ) { return true }
+                else {
+                    const { tags } = schema
+                    const hasTag = filterTags
+                        .some( tag => tags.map( t => t.toLowerCase() ).includes( tag ) )
+                    return hasTag
+                }
+            } )
+// console.log( 'C', 'FilteredByNamespaceAndTags', filteredByNamespaceAndTags.length, '                Routes', filteredByNamespaceAndTags.reduce( (acc, s ) => { acc += Object.keys( s.routes ).length; return acc }, 0 ) )
+
+        const two = filteredByNamespaceAndTags
+            .filter( ( schema ) => {
+                const { namespace } = schema
+                if( Object.keys( schemaFilters ).length === 0 ) { return true }
+                return Object.hasOwn( schemaFilters, namespace )
+            } )
+            .map( ( schema ) => {
+                const { namespace } = schema
+                const newSchema = { ...schema }
+                if( Object.keys( schemaFilters ).length === 0 ) { return newSchema }
+                const schemaFilter = schemaFilters[ namespace ]
+                const hasIncludeRouteNames = schemaFilter
+                    .some( routeNameCmd => !routeNameCmd.startsWith( '!' ) )
+
+                newSchema['routes'] = Object
+                    .entries( schema['routes'] )
+                    .filter( ( [ routeName ] ) => {
+                        // exclude routes with '!' prefix
+                        const excludeTag = `!${routeName.toLowerCase()}`
+                        if( schemaFilter.includes( excludeTag ) ) { return false }
+                        if( hasIncludeRouteNames ) {
+                            const hasIncludeRouteName = schemaFilter
+                                .some( ( routeNameCmd ) => {
+                                    if( routeNameCmd.startsWith( '!' ) ) { return false }
+                                    return routeNameCmd.toLowerCase() === routeName.toLowerCase()
+                                } ) 
+                            return hasIncludeRouteName
+                        } else { return true }
+                    } )
+                    .reduce( ( acc, [ routeName, route ] ) => {
+                        acc[ routeName ] = route
+                        return acc
+                    }, {} )
+
+                return newSchema
+            } )
+            .filter( ( schema ) => {
+                const { routes } = schema
+                return Object.keys( routes ).length > 0
+            } )
+// console.log( 'D', 'FilteredByNamespaceAndTagsAndSchemaFilters', two.length, 'Routes', two.reduce( (acc, s ) => { acc += Object.keys( s.routes ).length; return acc }, 0 ) )
+
+        return { filteredArrayOfSchemas: two }
+    }
+
+
+    static activateServerTools( { server, schema, serverParams, validate=true, silent=true } ) {
+        if( validate ) {
+            Validation.schema( { schema } )
+            Validation.serverParams( { schema, serverParams } )
+        }
+
+        const { routes } = schema
+        let routeNames = Object
+            .keys( routes )
+
+        const mcpTools = routeNames
+            .reduce( ( acc, routeName ) => {
+                const { toolName, mcpTool } = FlowMCP
+                    .activateServerTool( { server, schema, serverParams, routeName, 'validate': false } )
+                acc[ toolName ] = mcpTool
+                return acc
+            }, {} )
+
+        if( !silent && routeNames.length > 0 ) {
+            const colWidths = [ 16, 3, 50 ]
+            const id = schema.namespace
+            const anzahl = routeNames.length
+            const routes = routeNames.join( ', ' )
+            
+            const formatCell = ( value, width ) => {
+                const str = String( value )
+                if( str.length > width ) {
+                    return str.substring( 0, width - 3 ) + '...'
+                }
+                return str.padEnd( width )
+            }
+            
+            const row = [
+                formatCell( id, colWidths[ 0 ] ),
+                formatCell( anzahl, colWidths[ 1 ] ),
+                formatCell( routes, colWidths[ 2 ] )
+            ].join( " | " )
+
+            console.warn( row )
+        }
+
+        return { mcpTools }
+    }
+
+
+    static activateServerTool( { server, schema, routeName, serverParams, validate=true } ) {
+        const { toolName, description, zod, func } = FlowMCP
+            .prepareServerTool( { schema, serverParams, routeName, validate } )
+        const mcpTool = server.tool( toolName, description, zod, func )
+
+        return { toolName, mcpTool }
+    }
+
+
+    static prepareServerTool( { schema, serverParams, routeName, validate=true } ) {
+        if( validate ) {
+            Validation.schema( { schema } )
+            Validation.serverParams( { schema, serverParams } )
+            Validation.routeName( { schema, routeName } )
+        }
+
+        const { toolName, description, zod } = Interface
+            .toServerTool( { schema, routeName } )
+        const result = {
+            toolName,
+            description,
+            zod,
+            'func': async( userParams ) => {
+                const { struct, payload } = await Fetch
+                    .from( { schema, userParams, serverParams, routeName } )
+                const { status, messages, dataAsString } = struct
+                if( !status ) {
+                    return { content: [ { type: "text", text: `Error: ${messages.join( ', ' )}` } ] }
+                } else {
+                    return { content: [ { type: "text", text: `Result: ${dataAsString}` } ] }
+                }
+            }
+        }
+
+        return result 
+    }
+
+
+    static getZodInterfaces( { schema } ) {
+        Validation.schema( { schema } )
+        const result = Interface.from( { schema } )
+
+        return result
+    }
+
+
+    static getAllTests( { schema } ) {
+        Validation.schema( { schema } )
+        const result = Test.all( { schema } )
+
+        return result
+    }
+
+
+    static validateSchema( { schema } ) {
+        const result = Validation
+            .schema( { schema, 'strict': false } )
+
+        return result
+    }
+
+
+    static async fetch( { schema, userParams, serverParams, routeName } ) {
+        Validation.schema( { schema } )
+        Validation.serverParams( { schema, serverParams } )
+        Validation.routeName( { schema, routeName } )
+        Validation.userParams( { schema, userParams, routeName } )
+        const { struct, payload } = await Fetch
+            .from( { schema, userParams, serverParams, routeName } )
+
+        return struct
+    }
+}
+
+
+export { FlowMCP, Validation }
+
+
+================================================
+FILE: src/task/Fetch.mjs
+================================================
+import axios from 'axios'
+import { stringify as flattedStringify } from 'flatted'
+import { Validation } from './Validation.mjs'
+
+import util from 'util'
+
+
+class Fetch {
+    static async from({ schema, userParams, serverParams, routeName } ) {
+        let struct = {
+            status: true,
+            messages: [],
+            data: null,
+            dataAsString: null
+        };
+    
+        const { requestMethod, url, headers, body, modifiers, _allParams } = Fetch
+            .#prepare( { schema, userParams, serverParams, routeName } )
+        userParams = { ...userParams, _allParams }
+        let payload = { requestMethod, url, headers, body, modifiers }
+
+        await Validation
+            .getTypes()['enums']['phases']
+            .reduce( ( promise, phaseType ) => promise.then( async () => {
+                const relevantModifiers = modifiers
+                    .filter( ( { phase } ) => phase.includes( phaseType ) )
+                if( phaseType === "execute" && relevantModifiers.length === 0 ) {
+                    struct = await Fetch.#executeDefault( { struct, payload } )
+                } else if (relevantModifiers.length > 0) {
+                    const result = await Fetch.#modifierLoop( { struct, payload, userParams, routeName, phaseType } )
+                    struct = result.struct
+                    payload = result.payload
+                }
+            } ), Promise.resolve() )
+
+        const { dataAsString } = Fetch
+            .stringifyResponseData( { data: struct['data'] } )
+        struct['dataAsString'] = dataAsString
+
+        return { struct, payload }
+    }
+    
+
+
+/*
+    static async from1( { schema, userParams, serverParams, routeName } ) {
+        let struct = {
+            'status': true,
+            'messages': [],
+            'data': null,
+            'dataAsString': null
+        }
+
+        const { requestMethod, url, headers, body, modifiers } = Fetch
+            .#prepare( { schema, userParams, serverParams, routeName } )
+        
+        let payload = { requestMethod, url, headers, body, modifiers }
+
+        const { struct: s1, payload: p1 } = await Fetch
+            .#modifierLoop( { struct, payload, userParams, routeName, 'phaseType': 'pre' } )
+        struct = { ...s1 }; payload = { ...p1 }
+        if( struct['status'] === false ) { return { struct, payload } }
+
+        if( modifiers.map( ( { phase } ) => !phase.includes( 'execute' ) ).some( a => a ) )  {
+            struct = await Fetch
+                .#execute( { struct: { ...s1 }, payload: { ...p1 } } )
+        } else {
+            const { struct: s2, payload: p2 } = await Fetch
+                .#modifierLoop( { struct: { ...struct }, payload: { ...p1 }, userParams, routeName, 'phaseType': 'execute' } )
+            struct = { ...s2 }; payload = { ...p2 }
+        }
+
+        const { struct: s3, payload: p3 } = await Fetch
+            .#modifierLoop( { struct, payload, userParams, routeName, 'phaseType': 'post' } )
+        struct = { ...s3 }; payload = { ...p3 }
+        if( struct['status'] === false ) { return { struct, payload } }
+
+        const { dataAsString } = Fetch
+            .stringifyResponseData( { data: struct['data'] } )
+        struct['dataAsString'] = dataAsString
+
+        return { struct, payload }
+    }
+*/
+
+    static #prepare( { schema, userParams, serverParams, routeName }  ) {
+        const { root, headers: _headers, routes } = schema
+        const route = routes[ routeName ]
+        const { requestMethod, route: _route } = route
+        let { modifiers } = route
+
+        const headers = Object
+            .entries( _headers )
+            .reduce( ( acc, [ key, value ] ) => {
+                acc[ key ] = Fetch.#insertValue( { 
+                    userParams, serverParams, key, value 
+                } )
+                return acc
+            }, {} )
+
+        const parametersWithRequired = route['parameters']
+            .map( ( param ) => {
+                if( !Object.hasOwn( param, 'z' ) ) { 
+                    return { 'required': true, ...param }
+                }
+                const { z } = param
+                const required = z['options'].includes( 'optional()') ? false : true
+
+                return { required, ...param } 
+            } )
+
+        const body = parametersWithRequired
+            .filter( ( { position: { location } } ) => location === 'body' )
+            .reduce( ( acc, { position: { key, value }, required } ) => {
+                const modValue = Fetch
+                    .#insertValue( { userParams, serverParams, key, value, required } )
+                acc[ key ] = modValue
+                return acc
+            }, {} )
+
+        let url = parametersWithRequired
+            .filter( ( { position: { location } } ) => location === 'insert' )
+            .reduce( ( acc, { position: { key, value }, required } ) => {
+
+                const to = Fetch
+                    .#insertValue( { userParams, serverParams, key, value } )
+                acc = acc
+                    .replaceAll( `:${key}`, to )
+                    .replaceAll( `{{${key}}}`, to )
+                return acc
+            }, `${root}${_route}` )
+        url = Object
+            .entries( serverParams )
+            .reduce( ( acc, [ key, value ] ) => {
+                acc = acc.replaceAll( `{{${key}}}`, value )
+                return acc
+            }, url )
+
+        const { iterate } = parametersWithRequired
+            .filter( ( { position: { location } } ) => location === 'query' )
+            .reduce( ( acc, { position: { key, value }, required }, index, arr ) => {
+                const modValue = Fetch
+                    .#insertValue( { userParams, serverParams, key, value, required } )
+                if( modValue === undefined ) { return acc }
+
+                acc['iterate'][ key ] = modValue
+                return acc
+            }, { 'iterate': {} } )
+
+        let query = ''
+        query += new URLSearchParams( iterate ).toString()
+        query = query !== '' ? '?' + query : ''
+        url += query
+
+        modifiers = modifiers
+            .reduce( ( acc, { phase, handlerName }, index ) => {
+                const func = schema['handlers'][ handlerName ]
+                acc.push( { phase, handlerName, func } )
+                return acc
+            }, [] )
+
+        const _allParams = schema['routes'][ routeName ]['parameters']
+            .reduce( ( acc, { position: { key, value } } ) => {
+                const modValue = Fetch
+                    .#insertValue( { userParams, serverParams, key, value } )
+                if( modValue === undefined ) { return acc }
+                acc[ key ] = modValue
+                return acc
+            }, {} )
+
+        return { requestMethod, url, headers, body, modifiers, _allParams } 
+    }
+
+
+    static async #executeDefault( { struct, payload } ) {
+        const { requestMethod, url, headers, body, modifiers } = payload
+        struct['status'] = struct['messages'].length === 0
+        if( struct['status'] === false ) { return struct }
+
+        switch( requestMethod.toUpperCase() ) {
+            case 'GET':
+                try {
+                    const response = await axios.get( url, { headers } )
+                    const { data } = response
+                    struct['data'] = data
+                } catch( error ) {
+                    struct['status'] = false
+                    const messages = Fetch.getErrorMessages( { error } )
+                    struct['messages'].push( ...messages )
+                }
+                break;
+            case 'POST':
+                try {
+                    const response = await axios.post( url, body, { headers } )
+                    const { data } = response
+                    struct['data'] = data
+                } catch( error ) {
+                    struct['status'] = false
+                    const messages = Fetch.getErrorMessages( { error } )
+                    struct['messages'].push( ...messages )
+                }
+
+                break;
+            default:
+                struct['status'] = false
+                struct['messages'].push( 'Unknown method:', requestMethod )
+                console.warn('Unknown method:', requestMethod )
+        }
+
+        if( struct['status'] === false ) { return struct }
+
+        return struct
+    }
+
+
+    static async #modifierLoop( { struct, payload, userParams, routeName, phaseType } ) {
+        const { modifiers } = payload
+        for( const { phase, func } of modifiers ) {
+            if( phase !== phaseType ) { continue }
+            try {
+                const { struct: _struct, payload: _payload } = await func( { struct, payload, userParams, routeName, phaseType } )
+                struct = _struct
+                payload = _payload
+            } catch( e ) {
+                struct['status'] = false
+                struct['messages'].push( e.message )
+            }
+        }
+
+        return { struct, payload }
+    }
+    
+
+
+    static getErrorMessages( { error } ) {
+        let messages = []
+        if( error.response ) {
+            messages.push( `Status: ${error.response?.status}` )
+            messages.push( `Text: ${error.response?.statusText}` )
+            try { messages.push( `Data: ${JSON.stringify( error.response?.data ) }` ) } 
+            catch( _ ) { messages.push( `${error.response?.data}` )}
+        } else if( error.request ) {
+            messages.push( 'No response received from server.' )
+            messages.push( 'Request:', error.request )
+        } else {
+            messages.push( 'Error in setting up the request:', error.message )
+        }
+
+        return messages
+    }
+
+
+
+    static #insertValue( { userParams, serverParams, key, value, required } ) {
+        let type = null
+        let params = null
+        let paramName = null
+
+        if( value.includes( '{{USER_PARAM}}' ) ) { params = userParams; type = 'user' } 
+        else if( value.includes( '{{' ) ) { params = serverParams; type = 'server' }
+        if( !params ) { return value }
+
+        if( type === 'user' ) { paramName = key }
+        else if( type === 'server' ) {
+            const start = value.indexOf( '{{' )
+            const end = value.indexOf( '}}' )
+            if( start !== -1 && end !== -1 ) {
+                paramName = value.slice( start + 2, end ).trim()
+            } else {
+                throw new Error( `Invalid parameter format: ${value}` )
+            }
+        }
+
+        if( type === 'user' ) {
+            if( userParams[ key ] === undefined ) { return undefined }
+            value = value.replace( '{{USER_PARAM}}', userParams[ key ] )
+        } else if( type === 'server' ) {
+            value = value.replace( '{{' + paramName + '}}', params[ paramName ] )
+        } else {
+            throw new Error( `Invalid parameter type: ${type}` )
+        }
+
+        return value
+    }
+
+
+    static stringifyResponseData( { data } ) {
+        let dataAsString = null
+        try {
+            dataAsString = JSON.stringify( data )
+        } catch( jsonError ) {
+            try {
+                dataAsString = flattedStringify( data )
+            } catch( flattedError ) {
+                dataAsString = util.inspect( data, { 'depth': null, 'compact': false } )
+            }
+        }
+
+        return { dataAsString }
+    }
+}
+
+
+export { Fetch }
+
+
+================================================
+FILE: src/task/Interface.mjs
+================================================
+import { Validation } from './Validation.mjs'
+import { z } from 'zod'
+
+
+class Interface {
+    static from( { schema } ) {
+        const { routes } = schema
+        const zodSchemas = Object
+            .entries( routes )
+            .reduce( ( acc, [ routeName, _ ] ) => {
+                acc[ routeName ] = Interface
+                    .toServerTool( { schema, routeName } )
+                    // .toServerTool( { key, value } )
+                return acc
+            }, {} )
+
+        return zodSchemas
+    }
+
+
+    static toServerTool( { schema, routeName } ) {
+        const { namespace } = schema
+        const routeValue = schema['routes'][ routeName ]
+
+        const routeNameSnakeCase = routeName
+            .replace( /([a-z0-9])([A-Z])/g, '$1_$2' )
+            .toLowerCase()
+        const suffixSnakeCase = namespace
+            .replace( /([a-z0-9])([A-Z])/g, '$1_$2' )
+            .toLowerCase()
+        let toolName = `${routeNameSnakeCase}_${suffixSnakeCase}`
+        toolName = toolName
+            .substring( 0, 63 )
+            .replaceAll( ':', '' )
+            .replaceAll( '-', '_' )
+            .replaceAll( '/', '_' )
+
+        const { description } = routeValue
+        const zod = Interface
+            .getZodSchema( { route: routeValue, key: routeName } )
+
+        return { toolName, description, zod }
+    }
+
+
+    static getZodSchema( { route } ) {
+        const { parameters } = route
+        const zodSchema = parameters
+            .filter( ( param ) => {
+                if( !Object.hasOwn( param, 'z' ) ) { return false }
+                if( param['z'].length === 0 ) { return false }
+                return true
+            } )
+            .reduce( ( acc, param ) => {
+                const { position: { key }, z: { primitive, options } } = param
+
+                let _interface = Interface
+                    .#insertPrimitive( { primitive } )
+                _interface = Interface
+                    .#insertOptions( { _interface, options } )
+
+                acc[ key ] = _interface
+                return acc
+            }, {} )
+
+        return zodSchema
+    }
+
+
+    static #insertPrimitive( { primitive } ) {
+        function getContent( { str } ) {
+            const start = str.indexOf( '(' )
+            const end = str.lastIndexOf( ')' )
+            let content = null
+
+            if( start === -1 || end === -1 || end <= start ) {
+                return { content }
+            }
+            content = str.slice( start + 1, end )
+          
+            return { content }
+        }
+          
+
+        let [ primitiveName, zodPrimitive ]= Validation.getTypes()['enums']['primitives']
+            .find( ( [ type, _ ] ) => primitive.startsWith( type ) )
+
+        if( primitiveName.startsWith( 'enum' ) ) {
+            // finde erstes ( von dort bis zum letzten )
+
+            const { content } = getContent( { str: primitive } )
+            if( content === null ) {
+                throw new Error( `Invalid enum type: ${primitiveName}` )
+            }
+            const values = content
+                .split( ',' )
+                .map( ( item ) => item.trim() )
+            zodPrimitive = z.enum( values )
+        }
+
+        return zodPrimitive
+    }
+
+
+    static #insertOptions( { _interface, options } ) {
+        _interface = options
+            .reduce( ( acc, option ) => {
+                _interface = Interface
+                    .#insertOption( { _interface, option } )
+                return acc
+            }, _interface  )
+
+        return _interface
+    }
+
+
+    static #insertOption( { _interface, option } ) {
+        const item = Validation
+            .getTypes()['enums']['options']
+            .find( ( [ prefix ] ) => option.startsWith( prefix ) )
+
+        const [ _, zType, primitives ] = item
+        let value = null
+        switch( primitives ) {
+            case 'float':
+                value = parseFloat( option.slice( zType.length + 1, -1 ) )
+                break
+            case 'integer':
+                value = parseInt( option.slice( zType.length + 1, -1 ) )
+                break
+            case 'string':
+                value = option.slice( zType.length + 1, -1 )
+                break
+            case 'boolean':
+                value = option.slice( zType.length + 1, -1 ) === 'true'
+                break
+            case 'array':
+                value = option.slice( zType.length + 1, -1 )
+                    .split( ',' )
+                    .map( ( item ) => item.trim() )
+                break
+            case 'empty':
+                value = null
+                break
+            default:
+                throw new Error( `Unsupported zod type: ${primitives}` )
+        }
+
+        switch( zType ) {
+            case 'min':
+                _interface = _interface.min( value )
+                break
+            case 'max':
+                _interface = _interface.max( value )
+                break
+            case 'length':
+                _interface = _interface.length( value )
+                break
+            case 'enum':
+                console.log( '_interface', _interface )
+                _interface = _interface.enum( value )
+                break
+            case 'regex':
+                _interface = _interface.regex( new RegExp( value ) )
+                break
+            case 'optional':
+                _interface = _interface.optional()
+                break
+            case 'default':
+                _interface = _interface.default( value )
+                break
+            default:
+                throw new Error( `Unsupported zod type: ${zType}` )
+        }
+
+        return _interface
+    }
+}
+
+
+export { Interface }
+
+
+================================================
+FILE: src/task/Payload.mjs
+================================================
+class Payload {
+    static prepareActivations( { 
+        arrayOfSchemas, 
+        envObject
+    } ) {
+/*
+        const schemasImports = await listOfSchemaPaths
+            .reduce(
+                ( accPromise, fullPath, index ) => accPromise.then( async ( acc ) => {
+                    const result = { 'fileName': '', 'path': '', 'schema': null, 'messages': [] }
+
+                    try {
+                        result['fileName'] = path.basename( fullPath )
+                        const { schema } = await import( fullPath )
+                        result['path'] = fullPath
+                        result['schema'] = schema
+                        if ( !schema ) {
+                            result['messages'].push( `Schema not found in ${result['fileName']}` )
+                        }
+                    } catch ( err ) {
+                        console.log( `Error importing schema from ${fullPath}:`, err )
+                        result['messages'].push( `Error importing schema from ${fullPath}: ${err.message}` )
+                    }
+
+                    return [ ...acc, result ]
+                }),
+                Promise.resolve( [] )
+            )
+*/
+        const activationPayloads = arrayOfSchemas
+            .map( ( schema ) => {
+                const result = { 'fileName': '', 'path': '', schema, 'messages': [] }
+                return result
+            } )
+            // .map( ( item ) => { item['activateTags'] = activateTags; return item } ) 
+            .map( ( item ) => {
+                item['serverParams'] = null
+                if( item['messages'].length > 0 ) { return item } 
+                const { schema: { requiredServerParams } } = item
+                const selection = requiredServerParams
+                    .map( ( param ) => [ param, param ] )
+                const { messages, result: serverParams } = Payload
+                    .#parseEnvFileContent( { envObject, selection } )
+                item['messages'] = [ ...item['messages'], ...messages ]
+                item['serverParams'] = serverParams
+
+                return item
+            } )
+            .map( ( { schema, serverParams, messages } ) => {
+                return { schema, serverParams, messages }
+            } )
+
+        const messages = activationPayloads
+            .reduce( ( acc, item, index ) => {
+                const { fileName, messages } = item
+                const prefix = `${fileName} [${index}]`
+                messages
+                    .forEach( ( message ) => acc.push( `${prefix}: ${message}` ) )
+                return acc
+            }, [] )
+        const status = messages.length === 0
+        
+        return { status, messages, activationPayloads }
+    }
+
+
+    static #parseEnvFileContent( { envObject, selection } ) {
+        const messages = []
+    /*
+        const selection = [
+            [ 'privateKey', 'SOLANA_PRIVATE_KEY'     ],
+            [ 'publicKey',  'SOLANA_PUBLIC_KEY'      ],
+            [ 'apiKey',     'SOLANA_TRACKER_API_KEY' ],
+            [ 'nodeUrl',    'SOLANA_MAINNET_HTTPS'   ]
+        ]
+    */
+        const result = Object
+            .entries( envObject )
+            .reduce( ( acc, [ k, v ] ) => {
+                const find = selection.find( ( [ key, value ] ) => value === k )
+                if( find ) { 
+                    acc[ find[ 0 ] ] = v 
+                }
+                return acc
+            }, {} )
+
+        selection
+            .forEach( ( row ) => {
+                const [ key, _ ] = row
+                if( !result[ key ]  ) { messages.push( `Missing ${key} in .env file` ) } 
+                return true
+            } )
+
+        return { messages, result }
+    }
+}
+
+
+export { Payload }
+
+
+================================================
+FILE: src/task/Test.mjs
+================================================
+class Test {
+    static all( { schema } ) {
+        const { routes } = schema
+        const results = Object
+            .entries( routes )
+            .reduce( ( acc, [ routeName, value ] ) => {
+                const { tests } = value
+                tests
+                    .forEach( ( obj ) => {
+                        const { description, userParams } = Object
+                            .entries( obj )
+                            .reduce( ( abb, [ key, value ] ) => {
+                                if( key === '_description' ) {
+                                    abb['description'] = value
+                                } else if( !key.startsWith( '_' ) ) {
+                                    abb['userParams'][ key ] = value
+                                }
+
+                                return abb
+                            }, { 'description': '', 'userParams': {} } )
+
+                        const payload = { routeName, description, userParams }
+                        acc.push( payload )
+
+                        return true
+                    } )
+
+                return acc
+            }, [] )
+
+        return results
+    }
+}
+
+
+export { Test }
+
+
+================================================
+FILE: src/task/Validation.mjs
+================================================
+import { z } from 'zod'
+
+
+class Validation {
+    static getTypes() {
+        const types = {
+            'version': '1.2',
+            'types': {
+                'meta': [
+                    [ 'namespace',            'string'              ],
+                    [ 'name',                 'string'              ],
+                    [ 'description',          'string'              ],
+                    [ 'docs',                 'arrayOfStrings'      ],
+                    [ 'tags',                 'arrayOfStrings'      ],
+                    // [ 'version',              'string'              ],
+                    [ 'flowMCP',              'string'              ],
+                    [ 'root',                 'string'              ],
+                    [ 'requiredServerParams', 'arrayOfStrings'      ],
+                    [ 'headers',              'objectKeyValues'     ],
+                    [ 'routes',               'objectOfObjects'     ],
+                    [ 'handlers',             'objectKeyFunctions'  ]
+                ],
+                'route': [
+                    [ 'requestMethod',        'string'              ],
+                    [ 'description',          'string'              ],
+                    [ 'route',                'string'              ],
+                    [ 'parameters',           'arrayOfObjects'      ],
+                    [ 'tests',                'arrayOfObjects'      ],
+                    [ 'modifiers',            'arrayOfObjects'      ]
+                ],
+                'parametes': [
+                    [ 'position',             'arrayOfStrings'      ]
+                ],
+                'position': [
+                    [ 'key',                  'string'              ],
+                    [ 'value',                'string'              ],
+                    [ 'location',             'string'              ]
+                ],
+                'z': [
+                    [ 'primitive',            'string'              ],
+                    [ 'options',              'arrayOfStrings'      ]
+                ],
+                'tests': [
+                    [ '_description',         'string'              ]
+                ],
+                'modifiers': [
+                    [ 'phase',                'string'              ],
+                    [ 'handlerName',          'string'              ]
+                ]
+            },
+            'enums': {
+                'methods':   [ 'GET',  'POST'             ],
+                'positions': [ 'body', 'query',  'insert' ],
+                // 'phases':    [ 'pre',  'post'             ],
+                'phases': [ 'pre', 'execute', 'post' ],
+                'primitives': [
+                    [ 'string()',    z.string()     ],
+                    [ 'number()',    z.number()     ],
+                    [ 'boolean()',   z.boolean()    ],
+                    [ 'object()',    z.object()     ],
+                    [ 'enum(',       null           ],
+                    [ 'array()',     z.array( z.string() ) ],
+                ],
+                'options': [
+                    [ 'min(',      'min',      'float'   ],
+                    [ 'max(',      'max',      'float'   ],
+                    [ 'length(',   'length',   'int'     ],
+                    // [ 'enum(',     'enum',     'string'  ],
+                    [ 'regex(',    'regex',    'string'  ],
+                    [ 'optional(', 'optional', 'empty'   ],
+                    [ 'default(',  'default',  'string'  ]
+                ]
+            },
+            'regex': {
+                'versionNumber': /:([a-zA-Z_][a-zA-Z0-9_]*)/g
+            }
+        }
+
+        return types
+    }
+
+
+    static prepareActivations( { arrayOfSchemas, envObject, activateTags, includeNamespaces, excludeNamespaces} ) {
+        const messages = []
+        if( !Array.isArray( arrayOfSchemas ) || arrayOfSchemas.length === 0 ) {
+            messages.push( 'Missing or invalid arrayOfSchemas' )
+        } else if( !arrayOfSchemas.every( ( path ) => typeof path === 'object' ) ) {
+            messages.push( 'arrayOfSchemas must be an array of objects' )
+        }
+
+        if( !envObject || typeof envObject !== 'object' ) {
+            messages.push( 'Missing or invalid envObject' )
+        }
+
+        const n = [
+            [ 'includeNamespaces', includeNamespaces ],
+            [ 'excludeNamespaces', excludeNamespaces ],
+            [ 'activateTags',      activateTags      ]
+        ]
+            .forEach( ( [ name, value ] ) => {
+                if( value !== undefined ) {
+                    messages.push( `${name}: Is deprecated use filterArrayOfSchema instead.` )
+                }
+            } )
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        return true
+    }
+
+
+    static filterArrayOfSchemas( { arrayOfSchemas, includeNamespaces, excludeNamespaces, activateTags } ) {
+        const messages = []
+        if( !Array.isArray( arrayOfSchemas ) || arrayOfSchemas.length === 0 ) {
+            messages.push( 'Missing or invalid arrayOfSchemas' )
+        } else if( !arrayOfSchemas.every( ( path ) => typeof path === 'object' ) ) {
+            messages.push( 'arrayOfSchemas must be an array of objects' )
+        }
+
+        const n = [
+            [ 'includeNamespaces', includeNamespaces ],
+            [ 'excludeNamespaces', excludeNamespaces ],
+            [ 'activateTags',      activateTags      ]    
+        ]
+            .forEach( ( [ name, value ] ) => {
+                if( !Array.isArray( value ) ) {
+                    messages.push( `${name}: Must be an array` )
+                } else if( value.map( ( a ) => typeof a === 'string' && a !== '' ).some( a => !a ) ) {
+                    messages.push( `${name}: Must be an array of non-empty strings` )
+                }
+            } )
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        return true
+    }
+
+
+
+    static schema( { schema, strict=true } ) {
+        let id = 'schema'
+        const struct = {
+            'status': false,
+            'messages': []
+        }
+
+        const { 
+            version: flowMcpVersion,
+            types: {
+                meta: metaTypes,
+            }
+        } = Validation.getTypes()
+
+        if( !schema ) {
+            struct['messages'].push( `${id}: Missing schema` )
+        } else if( typeof schema !== 'object' ) {
+            struct['messages'].push( `${id}: schema must be an object` )
+        }
+        struct['status'] = struct['messages'].length === 0
+        strict ? Validation.#error( struct ) : ''
+        if( !struct['status'] ) { return struct }
+
+        const { status: s1, messages: m1 } = Validation
+            .#testObject( {  object: schema, types: metaTypes, id } )
+        strict ? Validation.#error( { status: s1, messages: m1 } ) : ''
+        if( !s1 ) { return { status: s1, messages: m1 } }
+
+        const { namespace } = schema
+        if( namespace == '' ) {
+            struct['messages'].push( `${id}.namespace: Namespace is empty` )
+        } else if( !/^[a-zA-Z]+$/.test( id ) ) {
+            struct['messages'].push( `${id}.namespace: Namespace "${namespace}" is not valid. Must be a string with only letters` )
+        } else {
+            id = `Schema.${namespace}`
+        }
+
+        const isValidVersion = ( str ) => /^\d+\.\d+\.\d+$/.test( str )
+        const { flowMCP } = schema
+        if( !isValidVersion( flowMCP ) ) {
+            struct['messages'].push( `${id}.flowMCP: ${flowMCP} is not valid. Must be in the format x.x.x` )
+        } else if( !flowMCP.startsWith( flowMcpVersion ) ) {
+            struct['messages'].push( `${id}.flowMCP: ${flowMCP} is not compatible with ${flowMcpVersion}.` )
+        }
+
+        const { root } = schema
+        const isValidUrl = ( str ) => {
+            try { new URL( str ); return true } catch { return false }
+        }
+        if( !isValidUrl( root ) ) {
+            struct['messages'].push( `${id}.root: ${root} is not valid. Must be a valid URL` )
+        }
+
+        const { status: s2, messages: m2 } = Object
+            .keys( schema['routes'] )
+            .reduce( ( acc, routeName ) => {
+                const messages = Validation.#route( { routeName, schema, id } )
+                acc['messages'].push( ...messages )
+                return acc
+            }, { 'status': false, 'messages': [] } )
+        struct['messages'].push( ...m2 )
+
+        struct['status'] = struct['messages'].length === 0
+        strict ? Validation.#error( struct ) : ''
+        if( !struct['status'] ) { return struct }
+
+        const { tags } = schema
+        tags
+            .map( ( tag, index ) => {
+                if( typeof tag !== 'string' ) {
+                    struct['messages'].push( `${id}.tags[${index}]: ${tag} is not valid. Must be a string` )
+                    return false
+                } else if( !/^[A-Za-z]+(\.(!)?[A-Za-z]+)?$/.test( tag ) ) {
+                    struct['messages'].push( `${id}.tags[${index}]: ${tag} is not valid. Must be a string with only letters and dots` )
+                    return false
+                }
+                const [ tagName, routeName ] = tag.split( '.' )
+                if( !routeName ) { return true }
+                const routeNames = Object
+                    .keys( schema['routes'] )
+                if( routeNames.findIndex( ( a ) => a === routeName.replace('!', '' ) ) === -1 ) {
+                    struct['messages'].push( `${id}.tags[${index}]: ${tag} is not valid. "${routeName}" is not a valid routeName. Choose from ${routeNames.join(', ')}` )
+                }
+            } )
+
+        const { requiredServerParams: schemaServerParams } = schema
+        const { allowedServerParams } = Validation
+            .#getAllowedServerParams( { schema } )
+        allowedServerParams
+            .forEach( ( param ) => {
+                const test = schemaServerParams.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    struct['messages'].push( `${id}.requiredServerParams: Required "${param}" serverParam is missing.` )
+                }
+            } )
+        schemaServerParams
+            .forEach( ( param ) => {
+                const test = allowedServerParams.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    struct['messages'].push( `${id}.requiredServerParams: Unknown "${param}" serverParam. Expected params are ${allowedServerParams.join( ', ')}` )
+                }
+            } )
+
+        struct['status'] = struct['messages'].length === 0
+        strict ? Validation.#error( struct ) : ''
+        if( !struct['status'] ) { return struct }
+
+        return struct
+    }
+
+
+    static routeName( { schema, routeName } ) {
+        const messages = []
+        const id = 'routeName'
+
+        if( !routeName ) {
+            messages.push( `${id}: Missing routeName` )
+        } else if( typeof routeName !== 'string' ) {
+            messages.push( `${id}: routeName must be a string` )
+        }
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        const { routes } = schema
+        if( !Object.keys( routes ).includes( routeName ) ) {
+            messages.push( `${id}: Unknown routeName "${routeName}". Expected routeNames are ${Object.keys( routes ).join( ', ')}` )
+        }
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        return true
+    }
+
+
+    static serverParams( { schema, serverParams } ) {
+        const messages = []
+        const id = 'serverParams'
+
+        if( !serverParams ) {
+            messages.push( `${id}: Missing serverParams` )
+        } else if( typeof serverParams !== 'object' ) {
+            messages.push( `${id}: serverParams must be an object` )
+        }
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        const { allowedServerParams } = Validation
+            .#getAllowedServerParams( { schema } )
+
+        const allKeys = Object.keys( serverParams )
+        allowedServerParams
+            .forEach( ( param ) => {
+                const test = allKeys.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    messages.push( `${id}: Missing required serverParam "${param}"` )
+                }
+            } )
+        allKeys
+            .forEach( ( param ) => {
+                const test = allowedServerParams.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    messages.push( `${id}: Unknown serverParam "${param}". Expected params are ${allowedServerParams.join( ', ')}` )
+                }
+            } )
+
+        Object
+            .entries( serverParams )
+            .forEach( ( [ key, value ] ) => {
+                if( !value ) {
+                    messages.push( `${id}: Value for ${key} is undefined` )
+                }
+            } )
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+
+        return true
+    }
+
+
+    static userParams( { userParams, schema, routeName } ) {
+        const messages = []
+        const { requiredUserParams, optionalUserParams } = Validation
+            .#getAllowedUserParams( { schema, routeName } )
+        const id = 'userParams'
+
+        if( !userParams ) {
+            messages.push( `${id}: Missing userParams` )
+        } else if( typeof userParams !== 'object' ) {
+            messages.push( `${id}: userParams must be an object` )
+        }
+
+        if( messages.length > 0 ) {
+            Validation.#error( { status: false, messages } )
+            return false
+        }
+        const allKeys = Object.keys( userParams )
+        requiredUserParams
+            .forEach( ( param ) => {
+                const test = allKeys.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    messages.push( `${id}: Missing required userParam "${param}"` )
+                }
+            } )
+        allKeys
+            .forEach( ( param ) => {
+                const test = optionalUserParams.findIndex( ( a ) => a === param )
+                if( test === -1 ) {
+                    messages.push( `${id}: Unknown userParam "${param}". Expected params are ${[ ...requiredUserParams, ...optionalUserParams ].join( ', ')}` )
+                }
+            } )
+
+        return true
+    }
+
+
+    static #route( { routeName, schema, id='' } ) {
+        const routeObj = schema['routes'][ routeName ]
+        id = `${id}.${routeName}`
+        const messages = []
+
+        const { types: { route: routeTypes } } = Validation
+            .getTypes()
+        const { status: s2, messages: m2 } = Validation
+            .#testObject( { object: routeObj, types: routeTypes, id } )
+       messages.push( ...m2 )
+        if( !s2 ) { return messages }
+
+        const { enums: { methods } } = Validation.getTypes()
+        if( !methods.includes( routeObj['requestMethod'] ) ) {
+            messages.push( `${id}.requestMethod: Unknown method (${routeObj['requestMethod']}), choose from ${methods.join( ', ' )}.` )
+        }
+
+        const { parameters } = routeObj
+
+        parameters
+            .forEach( ( item, index ) => {
+                const s = `${id}.parameters.[${index}]`
+                const { enums: { positions } } = Validation.getTypes()
+                if( !positions.includes( item['position']['location'] ) ) {
+                   messages.push( `${s}.location: Unknown location (${item['position']['location']}), choose from ${positions.join( ', ' )}.` )
+                }
+
+                if( item['position']['value'] !== '{{USER_PARAM}}' ) { return messages }
+                if( !Object.hasOwn( item, 'z' ) ) {
+                   messages.push( `Missing z for ${key} ${index}` )
+                }
+
+                const { types: { z: zTypes } } = Validation.getTypes()
+                const { status: s5, messages: m5 } = Validation
+                    .#testObject( { object: item['z'], types: zTypes, id } )
+
+               messages.push( ...m5 )
+                if( !s5 ) { return messages }
+
+                const { enums: { primitives, options } } = Validation.getTypes()
+
+                if( !primitives.map( a => item['z']['primitive'].startsWith( a[ 0 ] ) ).some( a => a ) ) {
+                   messages.push( `${s}.z.primitive: ${item['z']['primitive']} is not known. Choose from ${primitives.map( a => a[ 0 ]).join(', ')} instead.` )
+                }
+                const list = options.map( ( a ) => a[ 1 ] )
+
+                item['z']['options']
+                    .forEach( ( option, rindex ) => {
+                        const ss = `${s}.z.options[${rindex}]`
+                        if( !list.map( a => option.startsWith( a ) ).some( a => a ) ) {
+                            messages.push( `${ss}: The option "${option}" is unknown. Choose from ${list.join( ', ')}` )
+                        }
+
+                        if( !list.map( a => a[ 0 ] ) ) {
+                           messages.push( `${ss}: ${option}` )
+                        }
+                    } )
+            } )
+        if( messages.length > 0 ) { return messages }
+
+        const { route } = routeObj
+        const { regex: { versionNumber } } = Validation.getTypes()
+        const findInserts = ( path ) => {
+            const matches = path.match( versionNumber )
+            return matches ? matches.map(p => p.slice(1)) : [];
+        }
+
+        const { enums: { positions } } = Validation.getTypes()
+        const { requiredServerParams } = schema
+
+        findInserts( route )
+            .forEach( ( name, index ) => {
+                const s = `${id}.route.[${index}]`
+                const fromParameters = parameters
+                    .findIndex( ( a ) => {
+                        const one = a['position']['location'] === positions[ 2 ]
+                        const two = a['position']['key'] === name                    
+                        return one && two
+                    } )
+                const fromServerParams = requiredServerParams
+                    .findIndex( ( a ) => a === name )
+                if( fromParameters === -1 && fromServerParams === -1 ) {
+                    messages.push( `${s}: Missing parameter ${name} in route` )
+                }
+            } )
+
+        const { modifiers } = routeObj
+        modifiers
+            .forEach( ( item, index ) => {
+                const id = `${routeName}.modifiers.[${index}]`
+                const { types: { modifiers: modifierTypes } } = Validation.getTypes()
+                const { status: s3, messages: m3 } = Validation
+                    .#testObject( { object: item, types: modifierTypes, id, strict: true } )
+                messages.push( ...m3 )
+                if( !s3 ) { return messages }
+                const { enums: { phases } } = Validation.getTypes()
+                if( !phases.includes( item['phase'] ) ) {
+                   messages.push( `${id}.phase: Unknown phase (${item['phase']}), choose from ${phases.join( ', ' )}.` )
+                }
+
+                const { handlerName } = item
+                if( !Object.keys( schema['handlers'] ).includes( handlerName ) ) {
+                    messages.push( `${id}.handler: Unknown handler (${handlerName}), choose from ${Object.keys( schema['handlers'] ).join( ', ' )}.` )
+                }
+            } )
+
+        const { tests } = routeObj
+/*
+        const { required, optional } = parameters
+            .reduce( ( acc, item ) => {
+                const { position: { key, value, location } } = item
+                if( value === '{{USER_PARAM}}' ) {
+                    const test = item['z']['options']
+                        .map( a => a.startsWith( 'optional' ) )
+                        .some( a => a ) 
+                    if( test ) { acc['optional'].push( key ) }
+                    else { acc['required'].push( key ) }
+                }
+                return acc
+            }, { required: [], optional: [] } )
+*/
+        const { requiredUserParams, optionalUserParams } = Validation
+            .#getAllowedUserParams( { schema, routeName } )
+
+        tests
+            .forEach( ( item, index ) => {
+                const id = `${routeName}.tests.[${index}]`
+                const userKeys = Object
+                    .keys( item )
+                    .filter( ( key ) => !key.startsWith( '_' ) )
+                const metaKeys = Object
+                    .keys( item )
+                    .filter( ( key ) => key.startsWith( '_' ) )
+
+                requiredUserParams
+                    .forEach( ( r ) => {
+                        if( !userKeys.includes( r ) ) {
+                            messages.push( `${id}: Missing required parameter ${r}` )
+                        }
+                    } )
+
+                userKeys
+                    .forEach( ( key ) => {
+                        const one = requiredUserParams.includes( key )
+                        const two = optionalUserParams.includes( key )
+                        if( !one && !two ) {
+                            messages.push( `${id}: Unknown parameter ${key}` )
+                        }
+
+                        if( item[ key ] === undefined || item[ key ] === null ) {
+                            messages.push( `${id}: Missing value for ${key}. key "${key}" is value of "${item[key]}"` )
+                        }
+                    } )
+
+                const { types: { tests: _tests } } = Validation.getTypes()
+                const availableKeys = _tests.map( ( a ) => a[ 0 ] )
+                metaKeys
+                    .forEach( ( key ) => {
+                        if( !availableKeys.includes( key ) ) {
+                            messages.push( `${id}: Unknown test ${key}` )
+                        }
+                    } ) 
+            } )
+
+        return messages
+    }
+
+
+    static #testObject( { object, types, id='', strict=true } ) {
+        const struct = {
+            'status': false,
+            'messages': []
+        }
+
+        const requiredKeys = types.map( a => a[ 0 ] )
+        requiredKeys
+            .forEach( ( key ) => {
+                if( !Object.hasOwn( object, key ) ) {
+                    struct['messages'].push( `${id}: Missing required key: ${key}` )
+                }
+            }
+        )
+        if( struct['messages'].length > 0 ) { return struct }
+
+        Object
+            .entries( object )
+            .forEach( ( [ key, value ] ) => {
+                if( strict ) {
+                    if( !requiredKeys.includes( key ) ) {
+                        struct['messages'].push( `${id}: Unknown key: ${key}` )
+                        return false
+                    }
+                }
+
+                const typeIndex = types.findIndex( ( [ k ] ) => k === key )
+                if( typeIndex === -1 ) {
+                    struct['messages'].push( `${id}: Unknown key no type found: ${key}` )
+                    return false
+                }
+                const expectedType = types[ typeIndex ][ 1 ]
+                const { status, messages: m1 } =  Validation
+                    .#validateValue( { key, value, expectedType, id } )
+                struct['messages'].push( ...m1 )
+            } )
+
+        struct['status'] = struct['messages'].length === 0
+
+        return struct
+    }
+
+
+    static #validateValue( { key, value, expectedType, id } ) {
+        if( !value ) {
+            return {
+                status: false,
+                messages: [ `${id}: Value for ${key} is undefined` ]
+            }
+        }
+
+        const messages = []
+        switch( expectedType ) {
+            case 'string':
+                if( typeof value !== 'string' ) {
+                    messages.push( `${id}: Expected ${key} to be a string` )
+                }
+                break
+            case 'arrayOfStrings':
+                if( !Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an array` )
+                } else {
+                    value.forEach( ( v ) => {
+                        if( typeof v !== 'string' ) {
+                            messages.push( `${id}: Expected ${key} to be an array of strings` )
+                        }
+                    } )
+                }
+                break
+            case 'arrayOfObjects':
+                if( !Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an array` )
+                } else {
+                    value.forEach( ( v ) => {
+                        if( typeof v !== 'object' || Array.isArray( v ) ) {
+                            messages.push( `${id}: Expected ${key} to be an array of objects` )
+                        }
+                    } )
+                }
+                break
+            case 'arrayOfArray':
+                if( !Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an array` )
+                } else {
+                    value.forEach( ( v ) => {
+                        if( !Array.isArray( v ) ) {
+                            messages.push( `${id}: Expected ${key} to be an array of arrays` )
+                        }
+                    } )
+                }
+                break
+            case 'objectKeyValues':
+                if( typeof value !== 'object' || Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an object` )
+                }
+                break
+            case 'objectOfObjects':
+                if( typeof value !== 'object' || Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an object` )
+                }
+                break
+            case 'objectKeyFunctions':
+                if( typeof value !== 'object' || Array.isArray( value ) ) {
+                    messages.push( `${id}: Expected ${key} to be an object` )
+                }
+                break
+            default:
+                messages.push( `${id}: Unknown type: ${expectedType}` )
+        }
+
+        if( messages.length > 0 ) {
+            return {
+                status: false,
+                messages
+            }
+        }
+
+        return { status: true, messages }
+    }
+
+
+    static #getAllowedUserParams( { schema, routeName } ) {
+        const { parameters } = schema['routes'][ routeName]
+        const { requiredUserParams, optionalUserParams } = parameters
+            .reduce( ( acc, item ) => {
+                const { position: { key, value, location } } = item
+                if( value === '{{USER_PARAM}}' ) {
+                    const test = item['z']['options']
+                        // .map( a => a.startsWith( 'optionalUserParams' ) )
+                        .map( a => a.startsWith( 'optional' ) )
+                        .some( a => a ) 
+                    if( test ) { acc['optionalUserParams'].push( key ) }
+                    else { acc['requiredUserParams'].push( key ) }
+                }
+                return acc
+            }, { 'requiredUserParams': [], 'optionalUserParams': [] } )
+
+        return { requiredUserParams, optionalUserParams }
+    }
+
+
+    static #getAllowedServerParams( { schema } ) {
+        const { requiredFromParameters } = Object
+            .entries( schema['routes'] )
+            .reduce( ( acc, [ key, value ], index, arr ) => {
+                const t = value['parameters']
+                    .map( ( param ) => param['position']['value'] )
+                    .filter( a => a.startsWith( '{{' ) )
+                    .filter( a => a !== '{{USER_PARAM}}' )
+                    .map( a => { 
+                        a = a.replace( '{{', '' ).replace( '}}', '' ) 
+                        return a
+                    } )
+                    .forEach( ( param ) => acc['requiredFromParameters'].add( param ) )
+
+                return acc
+            }, { 'requiredFromParameters': new Set() } )
+
+        const { requiredFromHeaders } = Object
+            .entries( schema['headers'] )
+            .reduce( ( acc, [ key, value ], index, arr ) => {
+                if( typeof value !== 'string' ) { return acc }
+                const matches = [ ...value.matchAll( /{{(.*?)}}/g ) ]
+                const contents = matches
+                    .map( m => m[ 1 ] )
+                    .forEach( ( param ) => acc['requiredFromHeaders'].add( param ) )
+
+                return acc
+            }, { 'requiredFromHeaders': new Set() } )
+
+        const { root } = schema
+        const matches = [ ...root.matchAll( /{{(.*?)}}/g ) ]
+        const { requiredFromUrl } = matches
+            .reduce( ( acc, param ) => {
+                acc['requiredFromUrl'].add( param[ 1 ]  )
+                return acc
+            },  { 'requiredFromUrl': new Set() } )
+    
+        const allowedServerParams = Array
+            .from( new Set( [
+                ...requiredFromParameters, 
+                ...requiredFromHeaders,
+                ...requiredFromUrl
+            ] ) )
+            .sort( ( a, b ) => a.localeCompare( b ) )
+
+        return { allowedServerParams }
+    }
+
+
+    static #error( { status, messages } ) {
+        if( !status ) {
+            const points = messages
+                .map( ( m ) => { return `- ${m}` } )
+                .join( `\n` )
+
+            throw new Error( `\nValidation Error(s):\n${points}` )
+        }
+    }
+}
+
+
+export { Validation }
+
+
+================================================
+FILE: tests/ci/circle-ci.mjs
+================================================
+import { FlowMCP } from '../../src/index.mjs'
+import { SchemaImporter } from 'schemaimporter'
+import { Print } from './helpers/Print.mjs'
+
+
+const schemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: null
+    } )
+
+const { schema, namespace, fileName } = schemas[ 0 ]
+Print.log( `\n📦 ${namespace} → ${fileName}` )
+await FlowMCP
+    .getAllTests( { schema } )
+    .reduce( ( testPromise, test ) => testPromise.then( async () => {
+        const { routeName, userParams } = test
+        const { status, messages, dataAsString } = await FlowMCP
+            .fetch({ schema, userParams, routeName, 'serverParams': [] } )
+        Print.row( { status, messages, dataAsString, routeName } )
+        await Print.delay( 1000 )
+    } ), Promise.resolve() )
+
+
+================================================
+FILE: tests/fetch/fetch-all-routes.mjs
+================================================
+import { FlowMCP } from '../../src/index.mjs'
+import { SchemaImporter } from 'schemaimporter'
+import { Print } from './helpers/Print.mjs'
+
+
+const schemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: null
+    } )
+
+const { schema, namespace, fileName } = schemas[ 0 ]
+Print.log( `\n📦 ${namespace} → ${fileName}` )
+await FlowMCP
+    .getAllTests( { schema } )
+    .reduce( ( testPromise, test ) => testPromise.then( async () => {
+        const { routeName, userParams } = test
+        const { status, messages, dataAsString } = await FlowMCP
+            .fetch({ schema, userParams, routeName, 'serverParams': [] } )
+        Print.row( { status, messages, dataAsString, routeName } )
+        await Print.delay( 1000 )
+    } ), Promise.resolve() )
+
+
+================================================
+FILE: tests/fetch/fetch-all-schemas-wEnv.mjs
+================================================
+import fs from 'fs'
+
+import { FlowMCP } from '../../src/index.mjs'
+import { SchemaImporter } from 'schemaimporter'
+import { Print } from './helpers/Print.mjs'
+
+function getServerParams( { path, requiredServerParams } ) {
+    const selection = requiredServerParams
+        .map( ( serverParam ) => [ serverParam, serverParam ] )
+
+    const result = fs
+        .readFileSync( path, 'utf-8' )
+        .split( "\n" )
+        .map( line => line.split( '=' ) )
+        .reduce( ( acc, [ k, v ] ) => {
+            const find = selection.find( ( [ _, value ] ) => value === k )
+            if( find ) {  acc[ find[ 0 ] ] = v  }
+            return acc
+        }, {} )
+
+    selection
+        .forEach( ( row ) => {
+            const [ key, _ ] = row
+            if( !result[ key ]  ) { console.log( `Missing ${key} in .env file` ) } 
+            return true
+        } )
+
+    return result
+}
+
+
+const schemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: null
+    } )
+
+await schemas
+    .reduce( ( promise, struct ) => promise.then( async () => {
+        const { schema, namespace, fileName } = struct
+        Print.log( `\n📦 ${namespace} → ${fileName}` )
+        await FlowMCP
+            .getAllTests( { schema } )
+            .reduce( ( testPromise, test ) => testPromise.then( async () => {
+                const { routeName, userParams } = test
+                const serverParams = getServerParams( {
+                    'path': './../../.env',
+                    'requiredServerParams': schema.requiredServerParams
+                } )
+                const { status, messages, dataAsString } = await FlowMCP
+                    .fetch({ schema, userParams, routeName, serverParams } )
+                Print.row( { status, messages, dataAsString, routeName } )
+                await Print.delay( 1000 )
+            } ), Promise.resolve() )
+    } ), Promise.resolve() )
+
+
+
+
+================================================
+FILE: tests/fetch/fetch-all-schemas-woEnv.mjs
+================================================
+import { FlowMCP } from '../../src/index.mjs'
+import { SchemaImporter } from 'schemaimporter'
+import { Print } from './helpers/Print.mjs'
+
+
+const schemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: null
+    } )
+
+await schemas
+    .reduce( ( promise, struct ) => promise.then( async () => {
+        const { schema, namespace, fileName } = struct
+        Print.log( `\n📦 ${namespace} → ${fileName}` )
+        await FlowMCP
+            .getAllTests( { schema } )
+            .reduce( ( testPromise, test ) => testPromise.then( async () => {
+                const { routeName, userParams } = test
+                const { status, messages, dataAsString } = await FlowMCP
+                    .fetch({ schema, userParams, routeName, 'serverParams': [] } )
+                Print.row( { status, messages, dataAsString, routeName } )
+                await Print.delay( 1000 )
+            } ), Promise.resolve() )
+    } ), Promise.resolve() )
+
+
+
+
+================================================
+FILE: tests/fetch/helpers/Print.mjs
+================================================
+class Print {
+    static delay( ms ) { 
+        return new Promise( ( resolve ) => setTimeout( resolve, ms ) ) 
+    }
+
+    static padRaw( str, length ) {
+        const safeStr = String( str ?? '' )
+        return safeStr.length > length
+            ? safeStr.slice( 0, length - 1 ) + '…'
+            : safeStr.padEnd( length, ' ' )
+    }
+
+    static colorize( text, color ) {
+        const code = color === "green" ? "\x1b[32m" : "\x1b[31m"
+        return `${code}${text}\x1b[0m`
+    }
+
+    static warn( text ) {
+        console.warn( `${text}.` )
+    }
+
+    static log( text ) {
+        console.log( text )
+    }
+
+    static headline() {
+        console.log(
+            Print.padRaw( 'Route Name', 26 ) +
+            Print.padRaw( 'Status', 8 ) +
+            Print.padRaw( 'Success', 10 ) +
+            Print.padRaw( 'Message', 25 ) +
+            'Data Preview'
+        )
+        console.log( '-'.repeat( 100 ) )
+    }
+
+
+    static row( { status, messages, dataAsString, routeName } ) {
+        const statusRaw = Print.padRaw( status ? 'OK' : 'FAIL', 8 )
+        const statusText = status
+            ? Print.colorize( statusRaw, 'green' )
+            : Print.colorize( statusRaw, 'red' )
+
+        const preview = dataAsString ? dataAsString.substring( 0, 40 ) : '(no data)'
+
+        let message
+        message = Array.isArray( messages ) && messages.length > 0
+            ? messages.map( a => { a = a.replace('Status: ', '' ).replace('Text: ', '' ); return a } ).join( ', ' )
+            : ( typeof messages === 'string' && messages !== '' ? messages : '(empty)' )
+
+        console.log(
+            Print.padRaw( routeName, 26 ) +
+            statusText +
+            Print.padRaw( status.toString(), 10 ) +
+            Print.padRaw( message, 25 ) +
+            preview
+        )
+    }
+}
+
+
+export { Print }
+
+
+================================================
+FILE: tests/others/filter-array-of-schemas.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+import { FlowMCP } from '../../src/index.mjs'
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+console.log( 'arrayOfSchemas:', arrayOfSchemas.length )
+
+const { filteredArrayOfSchemas } = FlowMCP
+    .filterArrayOfSchemas( {
+        arrayOfSchemas,
+        includeNamespaces: ['luksoNetwork'],
+        excludeNamespaces: [], // ['luksoNetwork'],
+        activateTags: [] // [  'luksoNetwork.!getBlocks', 'luksoNetwork.!getBlockTransactions' ],
+    } )
+
+console.log( 'filteredArrayOfSchemas:', filteredArrayOfSchemas.length )
+
+
+================================================
+FILE: tests/others/filter-array-of-schemas.test.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from '../../src/index.mjs'
+
+
+describe( 'SchemaImporter & FlowMCP: Filtering by Namespace', () => {
+    let arrayOfSchemas
+    let filteredArrayOfSchemas
+
+
+    beforeAll( async () => {
+        arrayOfSchemas = await SchemaImporter.loadFromFolder( {
+            excludeSchemasWithImports: true,
+            excludeSchemasWithRequiredServerParams: true,
+            addAdditionalMetaData: true,
+            outputType: 'onlySchema'
+        } )
+
+        const result = FlowMCP.filterArrayOfSchemas( {
+            arrayOfSchemas,
+            includeNamespaces: [ 'luksoNetwork' ],
+            excludeNamespaces: [],
+            activateTags: []
+        } )
+
+        filteredArrayOfSchemas = result.filteredArrayOfSchemas
+    } )
+
+
+    it( 'loads a non-empty array of schemas', () => {
+        expect( Array.isArray( arrayOfSchemas ) ).toBe( true )
+        expect( arrayOfSchemas.length ).toBeGreaterThan( 0 )
+    } )
+
+
+    it( 'filters schemas by namespace "luksoNetwork"', () => {
+        expect( Array.isArray( filteredArrayOfSchemas ) ).toBe( true )
+        expect( filteredArrayOfSchemas.length ).toBeGreaterThan( 0 )
+
+
+        filteredArrayOfSchemas
+            .forEach( ( schema ) => {
+                expect( schema.namespace ).toBe( 'luksoNetwork' )
+            } )
+    } )
+} )
+
+
+
+================================================
+FILE: tests/others/validate-schema.mjs
+================================================
+import { FlowMCP } from "../../src/index.mjs";
+
+
+const schemas = [
+    {
+        namespace: "poap",
+        name: "POAP GraphQL",
+        description: "GraphQL endpoint for accessing POAP event data and metadata",
+        docs: ["https://public.compass.poap.tech/v1/graphql"],
+        tags: ["production", "poap.getTypename"],
+        flowMCP: "1.2.0",
+        root: "https://public.compass.poap.tech/v1/graphql",
+        requiredServerParams: [],
+        headers: {
+            "content-type": "application/json"
+        },
+        routes: {
+            getTypename: {
+                requestMethod: "POST",
+                description: "Basic connectivity test to retrieve __typename from the POAP GraphQL endpoint",
+                route: "/",
+                parameters: [ { position: { key: "query", value: "query { __typename }", location: "body" }, z: { primitive: "string()", options: [] } } ],
+                tests: [ { _description: "Run GraphQL __typename test" } ],
+                modifiers: []
+            }
+        },
+        handlers: {}
+    },
+    {
+        namespace: "example",
+        name: "Example API",
+        description: "An example API for testing purposes",
+        docs: ["https://example.com/docs"],
+        tags: ["example", "test"],
+        flowMCP: "1.2.0",
+        root: "https://api.example.com",
+        requiredServerParams: [],
+        handlers: {}
+    }
+]
+
+const tests = schemas
+    .forEach( ( schema, index ) => {
+        const { status, messages } = FlowMCP.validateSchema( { schema } )
+        if( status ) { console.log( `[${index}] Schema ${schema.namespace} is valid.` ) }
+        else {
+            console.error( `[${index}] Schema ${schema.namespace} is invalid:\n -`, messages.join( "\n - " ) )
+        }
+    } )
+
+
+
+
+
+================================================
+FILE: tests/others/validate-schema.test.mjs
+================================================
+import { FlowMCP } from '../../src/index.mjs'
+
+
+describe( 'Schema Validierung via FlowMCP.validateSchema()', () => {
+    const schemas = [
+        {
+            namespace: 'poap',
+            name: 'POAP GraphQL',
+            description: 'GraphQL endpoint for accessing POAP event data and metadata',
+            docs: [ 'https://public.compass.poap.tech/v1/graphql' ],
+            tags: [ 'production', 'poap.getTypename' ],
+            flowMCP: '1.2.0',
+            root: 'https://public.compass.poap.tech/v1/graphql',
+            requiredServerParams: [],
+            headers: {
+                'content-type': 'application/json'
+            },
+            routes: {
+                getTypename: {
+                    requestMethod: 'POST',
+                    description: 'Basic connectivity test to retrieve __typename from the POAP GraphQL endpoint',
+                    route: '/',
+                    parameters: [
+                        {
+                            position: {
+                                key: 'query',
+                                value: 'query { __typename }',
+                                location: 'body'
+                            },
+                            z: {
+                                primitive: 'string()',
+                                options: []
+                            }
+                        }
+                    ],
+                    tests: [ { _description: 'Run GraphQL __typename test' } ],
+                    modifiers: []
+                }
+            },
+            handlers: {}
+        },
+        {
+            namespace: 'example',
+            name: 'Example API',
+            description: 'An example API for testing purposes',
+            docs: [ 'https://example.com/docs' ],
+            tags: [ 'example', 'test' ],
+            flowMCP: '1.2.0',
+            root: 'https://api.example.com',
+            requiredServerParams: [],
+            handlers: {}
+        }
+    ]
+
+
+    it.each( schemas.map( ( schema, i ) => [ i, schema.namespace, schema ] ) )(
+        '[%d] validiert Schema %s',
+
+        ( index, namespace, schema ) => {
+            const ex = [ true, false ]
+            const { status, messages } = FlowMCP.validateSchema( { schema } )
+            expect( status ).toBe( ex[index] )
+        }
+    )
+} )
+
+
+
+================================================
+FILE: tests/others/zod-interface.test.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from '../../src/index.mjs'
+
+
+describe( 'MCP schema validation and Zod interface extraction', () => {
+    let schemas = []
+
+
+    beforeAll( async () => {
+        schemas = await SchemaImporter.loadFromFolder( {
+            excludeSchemasWithImports: true,
+            excludeSchemasWithRequiredServerParams: false,
+            addAdditionalMetaData: true,
+            outputType: null
+        } )
+
+        expect( Array.isArray( schemas ) ).toBe( true )
+        expect( schemas.length ).toBeGreaterThan( 0 )
+    } )
+
+
+    it( 'contains valid schemas', () => {
+        schemas
+            .forEach( ( { schema, namespace }, index ) => {
+                const { status, messages } = FlowMCP.validateSchema( { schema } )
+
+                if( !status ) {
+                    console.warn( `⚠️ Schema ${namespace} is invalid:\n - ${messages.join( '\n - ' )}` )
+                }
+
+                expect( status ).toBe( true )
+            } )
+    } )
+
+
+    it( 'extracts interfaces from all schemas', () => {
+        schemas
+            .forEach( ( { schema, namespace, fileName } ) => {
+                const interfaces = FlowMCP.getZodInterfaces( { schema } )
+
+                expect( interfaces ).toBeDefined()
+                expect( typeof interfaces ).toBe( 'object' )
+                expect( Object.keys( interfaces ).length ).toBeGreaterThan( 0 )
+
+
+                Object
+                    .entries( interfaces )
+                    .forEach( ( [ key, { toolName, zod } ] ) => {
+                        expect( typeof key ).toBe( 'string' )
+                        expect( typeof toolName ).toBe( 'string' )
+                        expect( zod ).toBeDefined()
+                    } )
+            } )
+    } )
+} )
+
+
+
+================================================
+FILE: tests/others/zod-interfaces.mjs
+================================================
+import { FlowMCP } from "../../src/index.mjs"
+import { SchemaImporter } from 'schemaimporter'
+
+
+const schemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: null
+    } )
+
+schemas
+    .forEach( ( { schema, namespace, fileName } ) => {
+        console.log( `🧩 ${namespace} → ${fileName}` )
+        const interfaces = FlowMCP
+            .getZodInterfaces(  { schema } )
+
+        Object
+            .entries( interfaces )
+            .forEach( ( [ key, value ] ) => {
+                const { toolName, description, zod } = value
+                console.log( ` - ${key} (${toolName})` )
+
+            } )
+        // console.log( '\n' )
+    } )
+
+
+================================================
+FILE: tests/server/local-server-module.mjs
+================================================
+import fs from 'fs'
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from '../../src/index.mjs'
+// import { LocalServer } from '../../src/index.mjs'
+import { LocalServer } from 'flowmcpServers'
+
+
+function getEnvObject( { source, envPath } ) {
+    let envObject
+
+    if( source === 'unknown' ) {
+        envObject = fs
+            .readFileSync( envPath, 'utf-8' )
+            .split( '\n' )
+            .reduce( ( acc, line ) => {
+                const [ key, value ] = line.split( '=' )
+                if( key && value ) { acc[ key.trim() ] = value.trim() }
+                return acc
+            }, {} )
+    } else if( source === 'claude' ) {
+        envObject = process.env
+    } else { 
+        console.log( 'Unknown source:', source ) 
+    }
+
+    return { envObject }
+}
+
+console.log( 'Starting Local Server...' )
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { includeNamespaces, excludeNamespaces, activateTags, source } = FlowMCP
+    .getArgvParameters( {
+        'argv': process.argv,
+        'includeNamespaces': [],
+        'excludeNamespaces': [],
+        'activateTags': [], 
+    } )
+const { envObject } = getEnvObject( { 
+    source,
+    envPath: './../../.env'
+} )
+
+
+const { filteredArrayOfSchemas } = FlowMCP
+    .filterArrayOfSchemas( {
+        arrayOfSchemas,
+        includeNamespaces,
+        excludeNamespaces,
+        activateTags,
+    } )
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { 
+        'arrayOfSchemas': filteredArrayOfSchemas, 
+        envObject
+    } )
+
+const localServer = new LocalServer( { silent: true } )
+localServer
+    .addActivationPayloads( { activationPayloads } )
+await localServer.start()
+console.log( 'Local Server started successfully.' )
+
+
+
+================================================
+FILE: tests/server/local-server-plain.mjs
+================================================
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { FlowMCP } from '../../src/index.mjs'
+
+
+const server = new McpServer( {
+    'name': 'Local Server',
+    'description': 'A local Model Context Protocol server',
+    'version': '1.2.2', 
+} )
+
+const schema = {
+    namespace: "poap",
+    name: "POAP GraphQL",
+    description: "GraphQL endpoint for accessing POAP event data and metadata",
+    docs: ["https://public.compass.poap.tech/v1/graphql"],
+    tags: ["production", "poap.getTypename"],
+    flowMCP: "1.2.0",
+    root: "https://public.compass.poap.tech/v1/graphql",
+    requiredServerParams: [],
+    headers: {
+        "content-type": "application/json"
+    },
+    routes: {
+        getTypename: {
+            requestMethod: "POST",
+            description: "Basic connectivity test to retrieve __typename from the POAP GraphQL endpoint",
+            route: "/",
+            parameters: [ { position: { key: "query", value: "query { __typename }", location: "body" }, z: { primitive: "string()", options: [] } } ],
+            tests: [ { _description: "Run GraphQL __typename test" } ],
+            modifiers: []
+        }
+    },
+    handlers: {}
+}
+
+const { mcpTool } = FlowMCP
+    .activateServerTool( {
+        'server': server, 
+        schema, 
+        routeName: 'getTypename',
+        serverParams: {}, 
+        activateTags: [], 
+        'silent': true 
+    } )
+// mcpTool.disable()
+// mcpTool.update()
+// mcpTool.enable()
+// mcpTool.remove()
+
+const transport = new StdioServerTransport()
+server.connect( transport )
+console.log( 'Local Server started and listening for requests.' )
+
+
+================================================
+FILE: tests/server/remote-server.mjs
+================================================
+import fs from 'fs'
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from '../../src/index.mjs'
+import { RemoteServer } from 'flowmcpServers'
+
+
+function getEnvObject( { source, envPath } ) {
+    let envObject
+
+    if( source === 'unknown' ) {
+        envObject = fs
+            .readFileSync( envPath, 'utf-8' )
+            .split( '\n' )
+            .reduce( ( acc, line ) => {
+                const [ key, value ] = line.split( '=' )
+                if( key && value ) { acc[ key.trim() ] = value.trim() }
+                return acc
+            }, {} )
+    } else if( source === 'claude' ) {
+        envObject = process.env
+    } else { 
+        console.log( 'Unknown source:', source ) 
+    }
+
+    return { envObject }
+}
+
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { includeNamespaces, excludeNamespaces, activateTags, source } = FlowMCP
+    .getArgvParameters( {
+        'argv': process.argv,
+        'includeNamespaces': [],
+        'excludeNamespaces': [],
+        'activateTags': [], 
+    } )
+
+const { envObject } = getEnvObject( { 
+    source,
+    envPath: './../../.env'
+} )
+
+const { filteredArrayOfSchemas } = FlowMCP
+    .filterArrayOfSchemas( {
+        arrayOfSchemas,
+        includeNamespaces,
+        excludeNamespaces,
+        activateTags
+    } )
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { 
+        'arrayOfSchemas': filteredArrayOfSchemas, 
+        envObject,
+    } )
+
+const remoteServer = new RemoteServer( { silent: false } )
+remoteServer
+    .addActivationPayloads( { 
+        activationPayloads, 
+        routePath: '/this', 
+        transportProtocols: [ 'sse' ] 
+    } )
+remoteServer.start()
+console.log( 'Remote Server started successfully.' )
+
+
+================================================
+FILE: .github/workflows/test-on-release.yml
+================================================
+name: Run Tests on Release
+
+on: push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests
+        run: NODE_OPTIONS="--experimental-vm-modules" npx jest
+
+

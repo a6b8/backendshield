@@ -1,0 +1,1922 @@
+Directory structure:
+└── flowmcp-x402-mcp-middleware/
+    ├── README.md
+    ├── LICENSE
+    ├── package.json
+    ├── src/
+    │   ├── index.mjs
+    │   └── task/
+    │       ├── X402Gateway.mjs
+    │       ├── X402Settler.mjs
+    │       └── X402Validator.mjs
+    ├── tests/
+    │   ├── 1-simple-server.mjs
+    │   ├── 2-simple-client.mjs
+    │   ├── 3-proxy.mjs
+    │   ├── client/
+    │   │   ├── MCPClientSSE.mjs
+    │   │   └── MCPStdioSSEProxy.mjs
+    │   ├── helpers/
+    │   │   └── ServerManager.mjs
+    │   └── schemas/
+    │       └── v1.2.0/
+    │           ├── defilama/
+    │           │   └── api.mjs
+    │           ├── pinata/
+    │           │   └── read.mjs
+    │           └── x402/
+    │               └── ping.mjs
+    └── .github/
+        ├── test-on-release.mjs
+        ├── .example.env
+        └── workflows/
+            └── test-on-release.yml
+
+================================================
+FILE: README.md
+================================================
+[![Test](https://img.shields.io/github/actions/workflow/status/flowmcp/flowmcp/test-on-release.yml)]() ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
+# X402 Middleware
+An Express-compatible payment gateway middleware for X402-protected MCP endpoints.
+
+This module provides a middleware component for building secure, payment-enabled server endpoints using the X402 micropayment protocol. It supports dynamic payment requirement injection, verification logic via `x402-core`, and seamless integration with `flowmcp`-based client tooling.
+
+---
+
+## Quickstart
+
+To get started quickly, clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/FlowMCP/x402-mcp-middleware
+cd x402-mcp-middleware
+npm i
+````
+
+You can now run a payment-enabled server and client with the examples below.
+
+---
+
+### Server
+
+The following example sets up a remote server using `X402Middleware`:
+
+```javascript
+import { RemoteServer } from 'mcpServers'
+import { FlowMCP } from 'flowmcp'
+import { ServerManager } from './helpers/ServerManager.mjs'
+import { X402Middleware } from '../src/index.mjs'
+import { schema as ping } from './schemas/v1.2.0/x402/ping.mjs'
+
+const envPath = './.env'
+
+const { x402Credentials, privateKey: x402PrivateKey } = ServerManager
+    .getX402Credentials( {
+        envPath,
+        envSelection: [
+            [ 'facilitatorPrivateKey', 'ACCOUNT_DEV_PRIVATE_KEY' ],
+            [ 'payTo1', 'ACCOUNT_DEV_PUBLIC_KEY' ],
+            [ 'serverProviderUrl', 'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+        ]
+    } )
+
+const cfg = {
+    chainId: 84532,
+    chainName: 'base-sepolia',
+    restrictedCalls: [
+        {
+            method: 'tools/call',
+            name: 'paid_ping_x402',
+            activePaymentOptions: [ 'usdc-sepolia' ]
+        }
+    ],
+    paymentOptions: {
+        'usdc-sepolia': {
+            contractId: 'usdc-sepolia',
+            maxAmountRequired: '0.01',
+            payTo: '{{payTo1}}'
+        }
+    },
+    contracts: {
+        'usdc-sepolia': {
+            domainName: 'USDC',
+            address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            assetType: 'erc20',
+            decimals: 6
+        }
+    }
+}
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { arrayOfSchemas: [ ping ], envObject: {} } )
+
+const middleware = await X402Middleware
+    .create( { ...cfg, x402Credentials, x402PrivateKey } )
+
+const remoteServer = new RemoteServer( { silent: false } )
+const app = remoteServer.getApp()
+
+app.use( middleware.mcp() )
+app.get( '/x402', ( _, res ) => res.send( 'X402 Server is running!' ) )
+
+remoteServer.addActivationPayloads( {
+    activationPayloads,
+    routePath: '/x402',
+    transportProtocols: [ 'sse' ]
+} )
+
+remoteServer.start()
+```
+
+---
+
+### Client
+
+The following example demonstrates how a client can consume the secured endpoint using `MCPClientSSE`:
+
+```javascript
+import { MCPClientSSE } from './client/MCPClientSSE.mjs'
+import { ClientExact } from 'x402-core'
+import { ServerManager } from './helpers/ServerManager.mjs'
+
+const { x402Credentials: clientCredentials, privateKey: clientPrivateKey } = ServerManager
+    .getX402Credentials( {
+        envPath: './.env',
+        envSelection: [
+            [ 'clientPrivateKey', 'ACCOUNT_DEV_PRIVATE_KEY' ],
+            [ 'clientProviderUrl', 'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+        ]
+    } )
+
+const allowedPaymentOptions = [
+    {
+        name: 'USDC',
+        tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        decimals: 6,
+        maxAmountRequired: '0.01'
+    }
+]
+
+const clientExact = new ClientExact( { silent: false } )
+    .init( { providerUrl: clientCredentials.clientProviderUrl } )
+await clientExact
+    .setWallet( { privateKey: clientPrivateKey, allowedPaymentOptions } )
+
+const client = new MCPClientSSE( {
+    serverUrl: 'http://localhost:8080/x402/sse',
+    silent: false
+} )
+
+await client.start()
+
+client.usePaymentHandler( async ( { originalRequest, response } ) => {
+    const paymentRequirementsPayload = response.data
+
+    const { paymentOption } = ClientExact
+        .selectMatchingPaymentOption( {
+            paymentRequirementsPayload,
+            allowedPaymentOptions,
+            chainId: 84532
+        } )
+
+    const { scheme, network } = paymentOption
+
+    const { authorization, signature } = await clientExact
+        .createAuthorization( {
+            paymentOption,
+            allowedPaymentOptions,
+            chainId: 84532
+        } )
+
+    const { headerString } = clientExact
+        .createXPaymentHeader( {
+            scheme,
+            network,
+            authorization,
+            signature
+        } )
+
+    const { retryResponse } = await client
+        .retryRequest( {
+            request: originalRequest,
+            headers: {
+                'X-PAYMENT': headerString
+            }
+        } )
+
+    return retryResponse
+} )
+
+const { status, data } = await client
+    .callTool( { toolName: 'paid_ping_x402', args: {} } )
+
+console.log( 'Status:', status, 'Data:', data.result.content )
+
+await client.close()
+```
+
+---
+
+## Features
+
+* Drop-in Express-compatible middleware for X402 micropayment protection
+* Enforces dynamic, schema-based payment requirements per endpoint
+* Automatic payment header verification and retry logic
+* Integrates seamlessly with `flowmcp` activation payloads and schemas
+* Chain-agnostic configuration using `chainId`, `contracts`, and `paymentOptions`
+* Validates input parameters and environment structure at runtime
+* Supports multiple payment options per endpoint with fallback logic
+* Designed for modular integration with `RemoteServer` and `ClientExact`
+
+---
+
+## Table of Contents
+
+- [X402 Middleware](#x402-middleware)
+  - [Quickstart](#quickstart)
+    - [Server](#server)
+    - [Client](#client)
+  - [Features](#features)
+  - [Table of Contents](#table-of-contents)
+  - [Methods](#methods)
+    - [create](#create)
+    - [mcp](#mcp)
+  - [Contribution](#contribution)
+  - [License](#license)
+
+---
+
+## Methods
+
+The `X402Middleware` class provides middleware functionality for X402-secured endpoints, including dynamic payment requirement handling and server initialization. The following methods are available:
+
+* `.create()` – initializes the middleware instance asynchronously.
+* `.mcp()` – returns the middleware handler function.
+
+### create
+
+Creates an instance of `X402Middleware`. This method validates the input, prepares the payment requirements, initializes the `ServerExact` instance, and sets the wallet using the private key.
+
+```javascript
+static .create( {
+    chainId,
+    chainName,
+    contracts,
+    paymentOptions,
+    restrictedCalls,
+    x402Credentials,
+    x402PrivateKey
+} )
+```
+
+| Key               | Type   | Description                                                                | Required |
+| ----------------- | ------ | -------------------------------------------------------------------------- | -------- |
+| `chainId`         | number | Chain ID for the blockchain network.                                       | Yes      |
+| `chainName`       | string | Name of the blockchain network.                                            | Yes      |
+| `contracts`       | object | Object mapping contract IDs to contract metadata.                          | Yes      |
+| `paymentOptions`  | object | Available payment options.                                                 | Yes      |
+| `restrictedCalls` | array  | Calls requiring payment with `method`, `name`, and `activePaymentOptions`. | Yes      |
+| `x402Credentials` | object | X402 credentials including `serverProviderUrl`.                            | Yes      |
+| `x402PrivateKey`  | string | Wallet private key used for authorization.                                 | Yes      |
+
+**Returns:** an instance of `X402Middleware`
+
+---
+
+### mcp
+
+Returns the middleware handler function for Express-like servers.
+
+```javascript
+.mcp()
+```
+
+**Returns:** an Express-compatible middleware function
+
+---
+
+## Contribution
+
+Contributions, improvements, and feedback are highly welcome!
+Feel free to fork the repository, open issues, or submit pull requests.
+
+To contribute:
+
+1. Create a feature branch: `git checkout -b feature/my-feature`
+2. Commit your changes: `git commit -m 'Add my feature'`
+3. Push to the branch: `git push origin feature/my-feature`
+4. Open a pull request
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+See the [LICENSE](./LICENSE) file for details.
+
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+Copyright (c) 2025 αηdr3α5 ɮαηɦօlʐ3ʀ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+FILE: package.json
+================================================
+{
+  "name": "x402-mcp-middleware",
+  "version": "0.2.2",
+  "description": "",
+  "main": "./src/index.mjs",
+  "scripts": {
+    "inspector": "npx @modelcontextprotocol/inspector"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+   "dependencies": {
+    "x402-core": "github:flowmcp/x402-core#d0806f174aa3b08dd9955dc8f3a6d8841466c375"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.14.1",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "flowmcp": "github:flowmcp/flowmcp#a1523aa60699e168a6c7b4ec923ac5ee4f15d89a",
+    "schemaImporter": "github:flowmcp/flowMCP-schemas#3d378b3a61452126c833d667a9189ca578813c48",
+    "mcpServers": "github:flowmcp/flowmcp-servers#0c3c15d41ded418ad70d84d0ee267009e262af29"
+  }
+}
+
+
+================================================
+FILE: src/index.mjs
+================================================
+import { ServerExact, NonceStore } from 'x402-core'
+import { X402Gateway } from './task/X402Gateway.mjs'
+
+
+class X402Middleware {
+    #paymentRequirements
+    #serverExact
+
+
+    constructor( { paymentRequirements, serverExact } ) {
+        this.#paymentRequirements = paymentRequirements
+        this.#serverExact = serverExact
+    }
+
+
+    static async create( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } ) {
+        const { status, messages } = X402Middleware
+            .#validationCreate( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
+        if( !status ) { throw new Error( `X402Middleware.create: ${ messages.join( ', ' ) }` ) }
+
+        const paymentRequirements = X402Middleware
+            .#mapPaymentRequirements( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials } )
+        const { serverProviderUrl } = x402Credentials
+        const nonceStore = new NonceStore()
+        const serverExact = new ServerExact( { nonceStore, silent: false } )
+            .init( { providerUrl: serverProviderUrl } )
+        await serverExact
+            .setWallet( { privateKey: x402PrivateKey } )
+
+        return new X402Middleware( { paymentRequirements, serverExact } )
+    }
+
+
+    mcp() {
+        let middleware = X402Gateway
+            .mcp( { paymentRequirements: this.#paymentRequirements, serverExact: this.#serverExact } )
+
+        return middleware
+    }
+
+
+    static #mapPaymentRequirements( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials } ) {
+        const paymentRequirements = new Map()
+        restrictedCalls
+            .forEach( ( call ) => {
+                const { method, name, activePaymentOptions } = call
+
+
+                const { preparedPaymentOptions } = ServerExact
+                    .getPreparedPaymentOptions( { paymentOptions, activePaymentOptions, serverCredentials: x402Credentials } )
+
+                const { paymentRequirementsPayload } = ServerExact
+                    .getPaymentRequirementsPayload( {
+                        chainId,
+                        chainName,
+                        preparedPaymentOptions,
+                        contracts,
+                        resource: ''
+                    } )
+
+                if( !paymentRequirements.has( method ) ) {
+                    paymentRequirements.set( method, new Map() )
+                }
+
+                paymentRequirements
+                    .get( method )
+                    .set( name, paymentRequirementsPayload )
+            } )
+
+        return paymentRequirements
+    }
+
+
+    static #validationCreate( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } ) {
+        const struct = { status: false, messages: [] }
+
+        if( chainId === undefined ) {
+            struct['messages'].push( 'chainId: Is required' )
+        } else if( typeof chainId !== 'number' ) {
+            struct['messages'].push( 'chainId: Must be a number' )
+        }
+
+        if( chainName === undefined ) {
+            struct['messages'].push( 'chainName: Is required' )
+        } else if( typeof chainName !== 'string' ) {
+            struct['messages'].push( 'chainName: Must be a string' )
+        }
+
+        if( contracts === undefined ) {
+            struct['messages'].push( 'contracts: Is required' )
+        } else if( typeof contracts !== 'object' || Array.isArray( contracts ) ) {
+            struct['messages'].push( 'contracts: Must be an object' )
+        }
+
+        if( paymentOptions === undefined ) {
+            struct['messages'].push( 'paymentOptions: Is required' )
+        } else if( typeof paymentOptions !== 'object' || Array.isArray( paymentOptions ) ) {
+            struct['messages'].push( 'paymentOptions: Must be an object' )
+        }
+
+        if( restrictedCalls === undefined ) {
+            struct['messages'].push( 'restrictedCalls: Is required' )
+        } else if( !Array.isArray( restrictedCalls ) ) {
+            struct['messages'].push( 'restrictedCalls: Must be an array' )
+        }
+
+        if( x402Credentials === undefined ) {
+            struct['messages'].push( 'x402Credentials: Is required' )
+        } else if( typeof x402Credentials !== 'object' || Array.isArray( x402Credentials ) ) {
+            struct['messages'].push( 'x402Credentials: Must be an object' )
+        }
+
+        if( x402PrivateKey === undefined ) {
+            struct['messages'].push( 'x402PrivateKey: Is required' )
+        } else if( typeof x402PrivateKey !== 'string' ) {
+            struct['messages'].push( 'x402PrivateKey: Must be a string' )
+        }
+
+        if( struct['messages'].length > 0 ) {
+            return struct
+        }
+
+        struct['status'] = true
+        return struct
+    }
+}
+
+
+export { X402Middleware }
+
+
+================================================
+FILE: src/task/X402Gateway.mjs
+================================================
+import { X402Validator } from './X402Validator.mjs'
+import { X402Settler } from './X402Settler.mjs'
+
+
+class X402Gateway {
+    static mcp( { paymentRequirements, serverExact } ) {
+        return async function cryptoMiddleware( req, res, next ) {
+            const method = req.body?.method
+            const name = req.body?.params?.name
+
+            const paymentRequirement = paymentRequirements.get( method )?.get( name )
+            if( !paymentRequirement ) { return next() }
+
+            const body = X402Gateway.#getResponseBody( { method, name, paymentRequirements } )
+
+            const xPayment = req.get('x-payment')
+            if( xPayment === undefined ) { 
+                return X402Gateway.#res( { body, res, code: 'ERR_MISSING_XPAYMENT' } ) 
+            }
+            else if( typeof xPayment !== 'string' ) { return X402Gateway.#res( { body, res, code: 'ERR_INVALID_HEADER_TYPE' } ) }
+            else if( xPayment === '' ) { return X402Gateway.#res( { body, res, code: 'ERR_EMPTY_HEADER' } ) }
+
+            const isValid = (() => { try { JSON.parse( xPayment ); return true } catch { return false } })()
+            if( !isValid ) { return X402Gateway.#res( { body, res, code: 'ERR_INVALID_JSON' } ) }
+
+            const parsedXPayment = JSON.parse( xPayment )
+            const { isValidX402Response } = X402Gateway.#isValidX402Response( { parsedXPayment } )
+            if( !isValidX402Response ) { return X402Gateway.#res( { body, res, code: 'ERR_INVALID_SCHEMA' } ) }
+
+            const { scheme } = parsedXPayment
+            const isValidScheme = [ 'exact' ].includes( scheme )
+            if( !isValidScheme ) { return X402Gateway.#res( { body, res, code: 'ERR_UNSUPPORTED_SCHEME' } ) }
+
+            const { valid, errorCode, selectedRequirement } = await X402Validator
+                .verifyPayload( { parsedXPayment, paymentRequirement, serverExact } )
+            if( !valid ) { return X402Gateway.#res( { body, res, code: errorCode } ) }
+
+            res.on( 'finish', async () => {
+                if( res.statusCode >= 200 && res.statusCode < 300 ) {
+                    try {
+                        const timeoutPromise = new Promise( ( _, reject ) => setTimeout( () => reject( new Error( 'Settlement timeout' ) ), 5000 ) )
+                        await Promise.race([
+                            X402Settler.settlePayload( { parsedXPayment, selectedRequirement, serverExact } ),
+                            timeoutPromise
+                        ] )
+                        console.log( 'Settlement completed successfully.' )
+                    } catch( err ) {
+                        console.error( 'Settlement failed:', err )
+                    }
+                }
+            } )
+
+            await next()
+        }
+    }
+
+
+    static #isValidX402Response( { parsedXPayment } ) {
+        if (!parsedXPayment || typeof parsedXPayment !== 'object') {
+            return { isValidX402Response: false }
+        }
+
+        const { x402Version, scheme, network, payload } = parsedXPayment
+        const isValidX402Response = [
+            [ 'x402Version', x402Version, 'number', null ],
+            [ 'scheme',      scheme,      'string', null ],
+            [ 'network',     network,     'string', null ],
+            [ 'payload',     payload,     'object', null ]
+        ]
+            .map( ( [ key, value, type ] ) => {
+                if( value === undefined || value === null ) { return false } 
+                else if( typeof value !== type || ( type === 'object' && Array.isArray( value ) ) ) { return false }
+                return true
+            } )
+            .every( ( a ) => a === true )
+
+        return { isValidX402Response }
+    }
+
+
+    static #getResponseBody( { method, name, paymentRequirements } ) {
+        let status = true
+        const body = paymentRequirements.get( method )?.get( name )
+        if( !body ) { status = false }
+
+        return { status, body }
+    }
+
+
+    static #res({ body, res, code }) {
+        const response = {
+            ...body.body,
+            x402Version: body.body.x402Version,
+            errorCode: code,
+            error: X402Gateway.errors[ code ] ?? 'Unknown Error'
+        }
+        res.status( 402 ).json( response )
+    }
+
+    static errors = {
+        'ERR_MISSING_XPAYMENT': 'X-PAYMENT header is missing',
+        'ERR_INVALID_HEADER_TYPE': 'X-PAYMENT header must be a string',
+        'ERR_EMPTY_HEADER': 'X-PAYMENT header is empty',
+        'ERR_INVALID_JSON': 'X-PAYMENT header contains invalid JSON',
+        'ERR_INVALID_SCHEMA': 'X-PAYMENT header schema invalid',
+        'ERR_UNSUPPORTED_SCHEME': 'Unsupported payment scheme',
+        'ERR_PAYLOAD_MISSING_FIELDS': 'Payload or authorization fields missing',
+        'ERR_SIGNATURE_INVALID': 'Signature verification failed',
+        'ERR_AUTHORIZATION_EXPIRED': 'Authorization time window invalid',
+        'ERR_AUTHORIZATION_VALUE_INVALID': 'Authorization value too low',
+        'ERR_AUTHORIZATION_TO_MISMATCH': 'Authorization recipient does not match',
+        'ERR_NONCE_ALREADY_USED': 'Nonce already used',
+        'ERR_ASSET_MISMATCH': 'Asset address mismatch',
+        'ERR_NETWORK_MISMATCH': 'Network mismatch',
+        'ERR_SIMULATION_FAILED': 'Transaction simulation failed',
+        'ERR_INTERNAL_VALIDATION_ERROR': 'Internal validation error'
+    }
+}
+
+
+export { X402Gateway }
+
+
+
+================================================
+FILE: src/task/X402Settler.mjs
+================================================
+class X402Settler {
+    static async settlePayload( { parsedXPayment, selectedRequirement, serverExact } ) {
+        // const { status, messages } = Validation.settlePayload( { parsedXPayment, selectedRequirement, serverExact } )
+        // if( !status ) { Validation.error( { messages } ) }
+
+        const { extra } = selectedRequirement
+        const { domain } = extra
+        const { verifyingContract } = domain
+
+        const { ok } = await serverExact.settleTransaction( {
+            decodedPayment: parsedXPayment,
+            tokenAddress: verifyingContract
+        } )
+
+
+        if( !ok ) {
+            console.error( 'Settlement failed' )
+        }
+
+        return { settlementStatus: ok }
+    }
+}
+
+
+export { X402Settler }
+
+
+================================================
+FILE: src/task/X402Validator.mjs
+================================================
+class X402Validator {
+    static async verifyPayload( { parsedXPayment, paymentRequirement, serverExact } ) {
+        try {
+            const { selectedRequirement } = serverExact
+                .findMatchingPaymentRequirements({
+                    paymentRequirementsPayload: paymentRequirement,
+                    decodedPayment: parsedXPayment
+                })
+            if( !selectedRequirement ) {
+                return { valid: false, errorCode: 'ERR_INVALID_SCHEMA' }
+            }
+
+            const validationResult = await serverExact.validatePayment({
+                decodedPayment: parsedXPayment,
+                paymentRequirement: selectedRequirement
+            })
+            if( !validationResult.ok ) {
+                return { valid: false, errorCode: 'ERR_SIGNATURE_INVALID' }
+            }
+
+            const verifyingContract = selectedRequirement.extra.domain.verifyingContract
+            const simulationResult = await serverExact.simulateTransaction({
+                decodedPayment: parsedXPayment,
+                tokenAddress: verifyingContract
+            })
+            if( !simulationResult.ok ) {
+                return { valid: false, errorCode: 'ERR_SIMULATION_FAILED' }
+            }
+
+            return { valid: true, selectedRequirement }
+        } catch( error ) {
+            console.error( error )
+            return { valid: false, errorCode: 'ERR_INTERNAL_VALIDATION_ERROR', 'selectedRequirement': null }
+        }
+    }
+}
+
+export { X402Validator }
+
+
+
+================================================
+FILE: tests/1-simple-server.mjs
+================================================
+import { RemoteServer } from 'mcpServers'
+import { FlowMCP } from 'flowmcp'
+import { ServerManager } from './helpers/ServerManager.mjs'
+
+import { X402Middleware } from '../src/index.mjs'
+
+import { schema as ping } from './schemas/v1.2.0/x402/ping.mjs'
+import { schema as pinataRead } from './schemas/v1.2.0/pinata/read.mjs'
+
+
+const env = {
+    'envPath': './../../../.env',
+    'schemaPath': './../../../tests/schemas/v1.2.0/',
+    'envSelection': [
+        [ 'facilitatorPrivateKey', 'ACCOUNT_DEVELOPMENT2_PRIVATE_KEY' ],
+        [ 'payTo1',                'ACCOUNT_DEVELOPMENT2_PUBLIC_KEY'  ],
+        [ 'serverProviderUrl',     'BASE_SEPOLIA_ALCHEMY_HTTP'        ]
+    ]
+}
+
+const cfg = {
+    'routePath': '/x402',
+    'chainId': 84532,
+    'chainName': 'base-sepolia',
+    'restrictedCalls': [
+        {
+            'method': 'tools/call',
+            'name': 'paid_ping_x402',  // 'get_protocols_defillama',
+            'activePaymentOptions': [ 'usdc-sepolia' ],
+        }
+    ],
+    'paymentOptions': {
+        'usdc-sepolia': { 
+            'contractId': 'usdc-sepolia',
+            'maxAmountRequired': '0.01',
+            'payTo': '{{payTo1}}',
+        }
+    },
+    'contracts': {
+        'usdc-sepolia': {
+            'domainName': 'USDC',
+            'address': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            'assetType': 'erc20',
+            'decimals': 6
+        }
+    }
+}
+
+
+const { envPath, envSelection, schemaPath } = env
+const { routePath, chainId, chainName, restrictedCalls, paymentOptions, contracts } = cfg
+
+const { managerVersion } = ServerManager
+    .getPackageVersion()
+const { envObject } = ServerManager
+    .getEnvObject( { envPath } )
+const { x402Credentials, privateKey: x402PrivateKey } = ServerManager
+    .getX402Credentials( { envPath, envSelection } )
+
+/*
+const { arrayOfSchemas } = await ServerManager
+     .getArrayOfSchemas( { schemaPath } )
+*/
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { arrayOfSchemas: [ ping, pinataRead ], envObject } )
+
+const remoteServer = new RemoteServer( { 'silent': false } )
+const app = remoteServer.getApp()
+
+const middleware = await X402Middleware
+    .create( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
+
+app.use( ( await middleware ).mcp() )
+app.get( routePath, ( _, res ) => res.send( `X402 Remote Server v${managerVersion} is running!` ) )
+
+remoteServer.addActivationPayloads( { activationPayloads, routePath, transportProtocols: [ 'sse' ] } )
+remoteServer.start()
+
+
+================================================
+FILE: tests/2-simple-client.mjs
+================================================
+import { MCPClientSSE } from './client/MCPClientSSE.mjs'
+import { ClientExact } from 'x402-core'
+import { ServerManager } from './helpers/ServerManager.mjs'
+
+
+const env = {
+    'envPath': './../../../.env',
+    'envSelection': [
+        [ 'clientPrivateKey', 'ACCOUNT_DEVELOPMENT_PRIVATE_KEY' ],
+        [ 'clientProviderUrl', 'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+    ]
+}
+
+const cfg = {
+    'silent': false,
+    'serverUrl': 'http://localhost:8080/x402/sse',
+    'chainId': '84532',
+    'chainName': 'base-sepolia',
+    'allowedPaymentOptions': [
+        {
+            'name': 'USDC',
+            'tokenAddress': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            'decimals': 6,
+            'maxAmountRequired': '0.01'
+        }
+    ]
+}
+
+const { envPath, envSelection } = env
+const { chainId, allowedPaymentOptions, serverUrl, silent } = cfg
+
+const { x402Credentials: clientCredentials, privateKey: clientPrivateKey } = ServerManager
+    .getX402Credentials( { envPath, envSelection } )
+
+const clientExact = new ClientExact( { silent } )
+    .init( { providerUrl: clientCredentials.clientProviderUrl } )
+await clientExact
+    .setWallet( { privateKey: clientPrivateKey, allowedPaymentOptions } )
+
+const client = new MCPClientSSE( { serverUrl, silent } )
+await client.start()
+
+
+client.usePaymentHandler( async ( { originalRequest, response } ) => {
+    const paymentRequirementsPayload = response.data
+console.log( 'paymentRequirementsPayload', paymentRequirementsPayload )
+    const { paymentOption } = ClientExact
+        .selectMatchingPaymentOption( { paymentRequirementsPayload, allowedPaymentOptions, chainId } )
+    const { scheme, network } = paymentOption
+
+    const { authorization, signature } = await clientExact
+        .createAuthorization( { paymentOption, allowedPaymentOptions, chainId } )
+    const { headerString } = clientExact
+        .createXPaymentHeader( { scheme, network, authorization, signature } )
+    const { retryResponse } = await client
+        .retryRequest( { request: originalRequest, headers: { 'X-PAYMENT': headerString } } )
+console.log( 'retryResponse', retryResponse )
+    return retryResponse
+} )
+
+const { status: s1, data: d1 } = await client
+    .callTool( { toolName: 'paid_ping_x402', args: {} } )
+console.log('status', s1, 'data', d1['result']['content'] )
+
+
+/*
+const { status: s2, data: d2 } = await client
+    .callTool( { toolName: 'free_read_cid_pinata', args: { 'cid': 'QmeSjSinHpPnmXmspMjwiXyN6zS4E9zccariGR3jxcaWtq/1'} } )
+console.log('status', s2, 'data', d2['result']['content'] )
+*/
+
+await client.close()
+
+
+
+================================================
+FILE: tests/3-proxy.mjs
+================================================
+// ./src/index.mjs
+
+import { MCPStdioSSEProxy } from './client/MCPStdioSSEProxy.mjs'
+import { ClientExact } from 'x402-core'
+import { ServerManager } from './helpers/ServerManager.mjs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+
+const args = Object.fromEntries(process.argv.slice(2).map(arg => {
+    const [key, value] = arg.split('=')
+    return [key.replace(/^--/, ''), value || true]
+}))
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const env = {
+    envPath: path.resolve(__dirname, '../../../../.env'),
+    envSelection: [
+        [ 'clientPrivateKey', 'ACCOUNT_DEVELOPMENT_PRIVATE_KEY' ],
+        [ 'clientProviderUrl', 'BASE_SEPOLIA_ALCHEMY_HTTP' ]
+    ]
+}
+
+const cfg = {
+    chainId: '84532',
+    chainName: 'base-sepolia',
+    allowedPaymentOptions: [
+        {
+            name: 'USDC',
+            tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            decimals: 6,
+            maxAmountRequired: '0.01'
+        }
+    ]
+}
+
+const silent = process.env.SILENT === 'true' || args.silent === 'true'
+const bearerToken = process.env.BEARER_TOKEN || args.bearerToken || '123'
+const serverUrl = process.env.SERVER_URL || args.serverUrl || 'http://localhost:8080/x402/sse'
+
+
+const { envPath, envSelection } = env
+const { chainId, allowedPaymentOptions } = cfg
+
+const { x402Credentials, privateKey } = ServerManager
+    .getX402Credentials({ envPath, envSelection })
+
+const clientExact = new ClientExact({ silent })
+    .init({ providerUrl: x402Credentials.clientProviderUrl })
+
+await clientExact
+    .setWallet({ privateKey, allowedPaymentOptions })
+
+
+async function getPaymentHeader(originalRequest, response) {
+    if (!response || typeof response !== 'object' || !Array.isArray(response.accepts)) {
+        console.warn('[x402] Missing "accepts" field in response, skipping payment header generation')
+        return null
+    }
+
+    const paymentRequirementsPayload = response
+
+    const { paymentOption } = ClientExact
+        .selectMatchingPaymentOption({ paymentRequirementsPayload, allowedPaymentOptions, chainId })
+
+    const { scheme, network } = paymentOption
+    const { authorization, signature } = await clientExact
+        .createAuthorization({ paymentOption, allowedPaymentOptions, chainId })
+    const { headerString } = clientExact
+        .createXPaymentHeader({ scheme, network, authorization, signature })
+
+    if (!silent) console.log('Generated X-PAYMENT header:', headerString)
+
+    return headerString
+}
+
+
+if (!silent) {
+    console.log('Starting MCP STDIO↔SSE Proxy...')
+    console.log('SSE URL:', serverUrl)
+    if (bearerToken) console.log('Using Bearer token')
+}
+
+const proxy = new MCPStdioSSEProxy({
+    serverUrl,
+    bearerToken,
+    getPaymentHeader: async (...args) => {
+        const header = await getPaymentHeader(...args)
+        if (!header) return null
+        return header
+    },
+    silent
+})
+
+proxy.start()
+
+
+
+================================================
+FILE: tests/client/MCPClientSSE.mjs
+================================================
+import readline from 'node:readline'
+import { Readable } from 'node:stream'
+
+
+class MCPClientSSE {
+    #serverUrl
+    #endpointUrl = null
+    #abortController = new AbortController()
+    #requestId = 1
+    #pendingRequests = new Map()
+    #responseInterceptors = []
+    #paymentHandlers = []
+    #silent
+    #methodLocks = new Map()
+    #methodLockDuration = 10_000
+
+
+    constructor( { serverUrl, silent = false } ) {
+        if( !serverUrl ) {
+            throw new Error( 'MCPClientSSE: serverUrl is required.' )
+        }
+
+        this.#serverUrl = new URL( serverUrl )
+        this.#silent = silent
+    }
+
+
+    useResponseInterceptor( interceptorFn ) {
+        this.#responseInterceptors.push( interceptorFn )
+    }
+
+
+    usePaymentHandler( handlerFn ) {
+        this.#paymentHandlers.push( handlerFn )
+    }
+
+
+    async start() {
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Starting connection and initialization' ) }
+
+        await this.#connectAndStartListener()
+        await this.#initialize()
+        await this.#notifyInitialized()
+
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Initialization complete' ) }
+
+        return { result: true }
+    }
+
+
+    async request( { method, params = {}, headers = {} } ) {
+        const now = Date.now()
+        const lastCall = this.#methodLocks.get( method ) || 0
+
+        if( now - lastCall < this.#methodLockDuration ) {
+            const message = `[MCPClientSSE] ERROR: Method '${method}' is locked (rate-limited). Wait before retrying.`
+            console.error( message )
+
+            return {
+                status: 429,
+                data: { error: 'Too many requests. Please wait before retrying.' }
+            }
+        }
+
+        this.#methodLocks.set( method, now )
+
+        if( !this.#silent ) { console.log( `[MCPClientSSE] Sending request: ${method}` ) }
+
+        const request = {
+            jsonrpc: '2.0',
+            id: this.#nextRequestId(),
+            method,
+            params
+        }
+
+        const response = await this.#sendRequest( { request, headers } )
+
+        return response
+    }
+
+
+    async callTool( { toolName, args = {}, headers = {} } ) {
+        if( !this.#silent ) { console.log( `[MCPClientSSE] Calling tool: ${toolName}` ) }
+
+        return await this.request( {
+            method: 'tools/call',
+            params: { name: toolName, arguments: args },
+            headers
+        } )
+    }
+
+
+    async close() {
+        this.#abortController.abort()
+
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Connection closed' ) }
+
+        return { result: true }
+    }
+
+
+    async #connectAndStartListener() {
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Connecting to SSE server' ) }
+
+        const res = await fetch( this.#serverUrl.href, {
+            headers: { 'Accept': 'text/event-stream' },
+            signal: this.#abortController.signal
+        } )
+
+        if( !res.ok ) {
+            throw new Error( `Failed to connect: ${res.status} ${res.statusText}` )
+        }
+
+        const nodeReadable = Readable.fromWeb( res.body )
+        const rl = readline.createInterface( {
+            input: nodeReadable,
+            crlfDelay: Infinity
+        } )
+
+        this.#startListening( rl )
+
+        while( !this.#endpointUrl ) {
+            await new Promise( ( resolve ) => setTimeout( resolve, 10 ) )
+        }
+
+        return { result: true }
+    }
+
+
+    async #startListening( rl ) {
+        try {
+            for await ( const line of rl ) {
+                if( !line.startsWith( 'data: ' ) ) continue
+
+                const data = line.substring( 6 )
+
+                if( !this.#endpointUrl ) {
+                    this.#endpointUrl = new URL( data, this.#serverUrl.origin )
+
+                    if( !this.#silent ) {
+                        console.log( `[MCPClientSSE] Received endpoint URL: ${this.#endpointUrl.href}` )
+                    }
+
+                    continue
+                }
+
+                if( !data.trim().startsWith( '{' ) ) continue
+
+                try {
+                    const message = JSON.parse( data )
+
+                    if( message.id && this.#pendingRequests.has( message.id ) ) {
+                        const { resolve } = this.#pendingRequests.get( message.id )
+                        this.#pendingRequests.delete( message.id )
+
+                        resolve( { status: 200, data: message } )
+                    }
+                } catch( err ) {
+                    if( !this.#silent ) {
+                        console.log( '[MCPClientSSE] Failed to parse message:', err )
+                    }
+                }
+            }
+        } catch( err ) {
+            if( err.name === 'AbortError' ) {
+                if( !this.#silent ) {
+                    console.log( '[MCPClientSSE] Listener aborted (normal shutdown)' )
+                }
+            } else {
+                throw err
+            }
+        }
+    }
+
+
+    async #initialize() {
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Sending initialize request' ) }
+
+        const request = {
+            jsonrpc: '2.0',
+            id: this.#nextRequestId(),
+            method: 'initialize',
+            params: {
+                protocolVersion: '2024-11-05',
+                capabilities: {},
+                clientInfo: {
+                    name: 'MCP-SSE-Client',
+                    title: 'MCP SSE Client',
+                    version: '1.0.0'
+                }
+            }
+        }
+
+        const response = await this.#sendRequest( { request } )
+
+        return response
+    }
+
+
+    async #notifyInitialized() {
+        if( !this.#silent ) { console.log( '[MCPClientSSE] Sending notifyInitialized' ) }
+
+        const notification = {
+            jsonrpc: '2.0',
+            method: 'notifications/initialized'
+        }
+
+        await fetch( this.#endpointUrl.href, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'MCP-Protocol-Version': '2024-11-05'
+            },
+            body: JSON.stringify( notification )
+        } )
+
+        return { result: true }
+    }
+
+
+    async #sendRequest( { request, headers = {} } ) {
+        return new Promise( async ( resolve, reject ) => {
+            this.#pendingRequests.set( request.id, { resolve, reject } )
+
+            const res = await fetch( this.#endpointUrl.href, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'MCP-Protocol-Version': '2024-11-05',
+                    ...headers
+                },
+                body: JSON.stringify( request )
+            } )
+
+            if( res.status === 202 ) {
+                // Response kommt asynchron über SSE
+            } else if( res.status === 402 ) {
+                let json = null
+                try { json = await res.json() } catch {}
+
+                this.#responseInterceptors
+                    .forEach( ( interceptor ) => {
+                        try { interceptor( { status: 402, data: json } ) } catch {}
+                    } )
+
+                for ( const handler of this.#paymentHandlers ) {
+                    try {
+                        const retryResult = await handler( {
+                            originalRequest: request,
+                            response: { status: 402, data: json }
+                        } )
+
+                        resolve( retryResult )
+                        this.#pendingRequests.delete( request.id )
+
+                        return
+                    } catch ( err ) {
+                        reject( err )
+                        this.#pendingRequests.delete( request.id )
+
+                        return
+                    }
+                }
+
+                resolve( { status: 402, data: json } )
+                this.#pendingRequests.delete( request.id )
+            } else if( res.headers.get( 'content-type' )?.startsWith( 'application/json' ) ) {
+                const json = await res.json()
+
+                this.#responseInterceptors
+                    .forEach( ( interceptor ) => {
+                        try { interceptor( { status: res.status, data: json } ) } catch {}
+                    } )
+
+                resolve( { status: res.status, data: json } )
+                this.#pendingRequests.delete( request.id )
+            } else if( !res.ok ) {
+                this.#pendingRequests.delete( request.id )
+                reject( new Error( `HTTP error: ${res.status}` ) )
+            }
+        } )
+    }
+
+
+    async retryRequest( { request, headers = {} } ) {
+        const retryResponse = await this.#sendRequest( { request, headers } )
+
+        return { retryResponse }
+    }
+
+
+    #nextRequestId() {
+        return this.#requestId++
+    }
+}
+
+
+export { MCPClientSSE }
+
+
+
+================================================
+FILE: tests/client/MCPStdioSSEProxy.mjs
+================================================
+// ./src/proxy/MCPStdioSSEProxy.mjs
+
+import readline from 'node:readline'
+import process from 'node:process'
+import z from 'zod'
+import { createParser } from 'eventsource-parser'
+
+const JSONRPCMessageSchema = z.object({
+    jsonrpc: z.literal('2.0'),
+    id: z.union([z.string(), z.number()]).optional(),
+    method: z.string().optional(),
+    params: z.any().optional(),
+    result: z.any().optional(),
+    error: z.object({
+        code: z.number(),
+        message: z.string(),
+        data: z.any().optional()
+    }).optional()
+})
+
+class SSEClientTransport {
+    #serverUrl
+    #postUrl = null
+    #bearerToken
+    #controller = new AbortController()
+    #onmessage = null
+    #onerror = null
+    #silent
+
+    constructor({ serverUrl, bearerToken = null, silent = false }) {
+        this.#serverUrl = serverUrl
+        this.#bearerToken = bearerToken
+        this.#silent = silent
+    }
+
+    setHandlers({ onmessage, onerror }) {
+        this.#onmessage = onmessage
+        this.#onerror = onerror
+    }
+
+    async start() {
+        const headers = { 'Accept': 'text/event-stream' }
+
+        if (this.#bearerToken) {
+            headers['Authorization'] = `Bearer ${this.#bearerToken}`
+        }
+
+        const response = await fetch(this.#serverUrl, {
+            method: 'GET',
+            headers,
+            signal: this.#controller.signal
+        })
+
+        if (!response.ok || !response.body) {
+            throw new Error(`Failed to connect SSE: HTTP ${response.status}`)
+        }
+
+        const parser = createParser({
+            onEvent: (event) => {
+                if (event.event === 'endpoint') {
+                    try {
+                        this.#postUrl = new URL(event.data, this.#serverUrl).toString()
+                        console.warn('[DEBUG] Set postUrl to:', this.#postUrl)
+                    } catch (err) {
+                        console.warn('[DEBUG] Failed to parse endpoint event data:', event.data)
+                        if (this.#onerror) this.#onerror(err)
+                    }
+                    return
+                }
+
+                if (event.event === 'message') {
+                    try {
+                        const parsed = JSON.parse(event.data)
+                        console.warn('[DEBUG] Received SSE message:', parsed)
+                        const message = JSONRPCMessageSchema.parse(parsed)
+                        if (this.#onmessage) this.#onmessage(message)
+                    } catch (err) {
+                        console.warn('[DEBUG] Failed to parse SSE message:', event.data)
+                        if (this.#onerror) this.#onerror(err)
+                    }
+                }
+            }
+        })
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+
+        const readLoop = async () => {
+            try {
+                while (true) {
+                    const { value, done } = await reader.read()
+                    if (done) break
+                    const chunk = decoder.decode(value, { stream: true })
+                    console.warn('[DEBUG] SSE chunk:', chunk)
+                    parser.feed(chunk)
+                }
+            } catch (err) {
+                console.warn('[DEBUG] SSE readLoop error:', err)
+                if (this.#onerror) this.#onerror(err)
+            }
+        }
+
+        readLoop()
+    }
+
+    async sendRequest({ message, getPaymentHeader }) {
+        if (!this.#postUrl) {
+            throw new Error('Cannot send before receiving endpoint URL')
+        }
+
+        const headers = { 'Content-Type': 'application/json' }
+
+        if (this.#bearerToken) {
+            headers['Authorization'] = `Bearer ${this.#bearerToken}`
+        }
+
+        console.warn('[DEBUG] Sending initial request:', message)
+
+        const response = await fetch(this.#postUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(message)
+        })
+
+        if (response.status === 402 && getPaymentHeader) {
+            const errorPayload = await response.json()
+
+            console.warn('[x402] 402 Payment Required - payload:', errorPayload)
+
+            const accepts = errorPayload?.accepts
+            console.warn('[x402] Raw accepts field:', accepts)
+            console.warn('[x402] Full response:', JSON.stringify(errorPayload, null, 2))
+
+            if (!Array.isArray(accepts)) {
+                console.warn('[x402] Missing or malformed "accepts" field in response, skipping payment header generation')
+                throw new Error('[x402] Payment header generation failed, cannot retry')
+            }
+
+            const header = await getPaymentHeader(message, errorPayload)
+            if (!header) {
+                throw new Error('[x402] Payment header generation failed, cannot retry')
+            }
+
+            console.warn('[x402] Retrying with X-PAYMENT header:', header)
+
+            const retryResponse = await fetch(this.#postUrl, {
+                method: 'POST',
+                headers: {
+                    ...headers,
+                    'X-PAYMENT': header
+                },
+                body: JSON.stringify(message)
+            })
+
+            if (!retryResponse.ok) {
+                throw new Error(`Retry failed: HTTP ${retryResponse.status}`)
+            }
+
+            return
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} on POST`)
+        }
+    }
+
+    async close() {
+        this.#controller.abort()
+    }
+}
+
+class MCPStdioSSEProxy {
+    #sseTransport
+    #getPaymentHeader
+
+    constructor({ serverUrl, bearerToken, getPaymentHeader, silent = false }) {
+        this.#sseTransport = new SSEClientTransport({ serverUrl, bearerToken, silent })
+        this.#getPaymentHeader = getPaymentHeader
+    }
+
+    async start() {
+        await this.#sseTransport.start()
+
+        this.#sseTransport.setHandlers({
+            onmessage: (msg) => {
+                console.warn('[DEBUG] Received message from server:', msg)
+                process.stdout.write(JSON.stringify(msg) + '\n')
+            },
+            onerror: (err) => {
+                console.warn('[DEBUG] SSE error encountered:', err)
+                console.error('SSE error:', err)
+            }
+        })
+
+        const rl = readline.createInterface({ input: process.stdin })
+
+        rl.on('line', async (line) => {
+            try {
+                console.warn('[DEBUG] Received input line:', line)
+                const message = JSON.parse(line)
+                await this.#sseTransport.sendRequest({
+                    message,
+                    getPaymentHeader: this.#getPaymentHeader
+                })
+            } catch (err) {
+                console.warn('[DEBUG] Error handling input line:', err)
+                console.error('Error parsing or sending message:', err)
+            }
+        })
+
+        rl.on('close', async () => {
+            console.warn('[DEBUG] Input stream closed, shutting down SSE transport.')
+            await this.#sseTransport.close()
+        })
+    }
+}
+
+export { SSEClientTransport, MCPStdioSSEProxy }
+
+
+
+================================================
+FILE: tests/helpers/ServerManager.mjs
+================================================
+import { SchemaImporter } from 'schemaImporter'
+import fs from 'fs'
+
+
+const config = {
+    'env': {
+        'development': './../../.env',
+        'production': './../.env'
+    },
+    'schemas': {
+        'development': './../../../schemas/v1.2.0/',
+        'production': './../../../schemas/v1.2.0/'
+    }
+}
+
+
+class ServerManager {
+    static getEnvObject( { envPath } ) {
+        const envObject = this
+            .#loadEnv( { envPath } )
+            .split( "\n" )
+            .filter( line => line && !line.startsWith( '#' ) && line.includes( '=' ) )
+            .map( line => line.split( '=' ) )
+            .reduce( ( acc, [ k, v ] ) => {
+                acc[ k ] = v.trim()
+                return acc
+            }, {} )
+
+        return { envObject }
+    }
+
+
+    static getX402Credentials( { envPath, envSelection } ) {
+        const rawEnv = this
+            .#loadEnv( { envPath} )
+            .split( "\n" )
+            .filter( line => line && !line.startsWith( '#' ) && line.includes( '=' ) )
+            .map( line => line.split( '=' ) )
+            .reduce( ( acc, [ k, v ] ) => {
+                acc[ k ] = v.trim()
+                return acc
+            }, {} )
+
+        const messages = []
+        const selection = envSelection
+            .reduce( ( acc, select ) => {
+                const [ varName, envKey ] = select
+                if( Array.isArray( envKey ) ) {
+                    acc[ varName ] = envKey
+                        .map( key => {
+                            const item = rawEnv[ key ]
+                            if ( item === undefined ) {
+                                messages.push( `Missing environment variable: ${key}` )
+                            }
+                            return item
+                        } )
+                } else {
+                    acc[ varName ] = rawEnv[ envKey ]
+                }
+                return acc
+            }, {} )
+
+        if( messages.length > 0 ) {
+            throw new Error( `Environment loading failed: ${ messages.join( ', ' ) }` )
+        }
+
+        const { x402Credentials, privateKey } = Object
+            .entries( selection )
+            .reduce( ( acc, [ key, value ] ) => {
+                if( key.toLowerCase().includes( 'privatekey' ) ) {
+                    if( acc['privateKey'] !== null ) { console.warn( `Multiple private keys found, using the first one` ); return acc }
+                    acc['privateKey'] = value
+                } else {
+                    acc['x402Credentials'][ key ] = value
+                }
+                return acc
+            }, { 'x402Credentials': {}, 'privateKey': null } )
+
+        return { x402Credentials, privateKey }
+    }
+
+
+    static getPackageVersion() {
+        const { version: managerVersion } = JSON.parse( fs.readFileSync( './package.json', 'utf-8' ) )
+        console.log( `Manager version: ${managerVersion}` )
+        return { managerVersion }
+    }
+
+
+    static async getArrayOfSchemas( { schemaPath } ) {
+        const arrayOfSchemas = await SchemaImporter
+            .loadFromFolder( {
+                schemaRootFolder: schemaPath,
+                excludeSchemasWithImports: false,
+                excludeSchemasWithRequiredServerParams: false,
+                addAdditionalMetaData: false,
+                outputType: 'onlySchema'
+            } )
+
+        return { arrayOfSchemas }
+    }
+    
+
+    static #loadEnv( { envPath } ) {
+        if( !envPath ) {
+            console.error( `No environment file found for stage type: ${stageType}` )
+            return false
+        }
+
+        const envFile = fs
+            .readFileSync( envPath, 'utf-8' )
+        return envFile
+    }
+}
+
+
+export { ServerManager }
+
+
+================================================
+FILE: tests/schemas/v1.2.0/defilama/api.mjs
+================================================
+const schema = {
+    namespace: "defillama",
+    name: "DeFi Llama MCP",
+    description: "Provides access to DeFi protocol and liquidity data from DeFi Llama",
+    docs: ["https://docs.llama.fi"],
+    tags: [],
+    flowMCP: "1.2.0",
+    root: "https://api.llama.fi",
+    requiredServerParams: [],
+    headers: {},
+    routes: {
+        getProtocols: {
+            requestMethod: "GET",
+            description: "Retrieve a list of all DeFi protocols from DeFi Llama (first 20)",
+            route: "/protocols",
+            parameters: [],
+            tests: [
+                { _description: "Test fetching protocols" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "modifyResult" }
+            ]
+        },
+        getProtocolTvl: {
+            requestMethod: "GET",
+            description: "Get TVL data for a specific DeFi protocol",
+            route: "/protocol/:protocol",
+            parameters: [
+                { position: { key: "protocol", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: [] } }
+            ],
+            tests: [
+                { _description: "Test Aave protocol TVL", protocol: "aave" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "modifyResult" }
+            ]
+        },
+        getChainTvl: {
+            requestMethod: "GET",
+            description: "Retrieve historical TVL data for a specific blockchain",
+            route: "/v2/historicalChainTvl/:chain",
+            parameters: [
+                { position: { key: "chain", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: [] } }
+            ],
+            tests: [
+                { _description: "Ethereum chain TVL", chain: "ethereum" }
+            ],
+            modifiers: [
+                { phase: "post", handlerName: "modifyResult" }
+            ]
+        }
+    },
+    handlers: {
+        modifyResult: ( { struct, payload } ) => {
+            return { struct, payload }
+        }
+    }
+}
+
+
+export { schema }
+
+
+================================================
+FILE: tests/schemas/v1.2.0/pinata/read.mjs
+================================================
+const schema = {
+    namespace: "pinata",
+    name: "Pinata IPFS Read MCP Interface",
+    description: "A FlowMCP interface for reading content from the Pinata IPFS gateway",
+    docs: ["https://gateway.pinata.cloud/"],
+    tags: [],
+    flowMCP: "1.2.0",
+    root: "https://gateway.pinata.cloud/ipfs",
+    requiredServerParams: [], //[ 'PINATA_GATEWAY' ],
+    headers: {},
+    routes: {
+        free_read_example: {
+            requestMethod: "GET",
+            description: "Returns a static IPFS-hosted example image",
+            route: "/{{cid}}",
+            parameters: [
+                { position: { key: "cid", value: 'QmeSjSinHpPnmXmspMjwiXyN6zS4E9zccariGR3jxcaWtq/1', location: "insert" } }
+            ],
+            tests: [ { _description: "Load sample image from IPFS" } ],
+            modifiers: [ { phase: "post", handlerName: "free_read_example" } ]
+        },
+        free_read_cid: {
+            requestMethod: "GET",
+            description: "Reads content from any IPFS CID",
+            route: "/{{cid}}",
+            parameters: [
+                { position: { key: "cid", value: "{{USER_PARAM}}", location: "insert" }, z: { primitive: "string()", options: [] } }
+            ],
+            tests: [ { _description: "Read arbitrary CID", cid: "QmYwAPJzv5CZsnAzt8auV2Annh6wKghpMdJtKhHgGMRFjx" } ],
+            modifiers: [ { phase: "post", handlerName: "free_read_cid" } ]
+        }
+    },
+    handlers: {
+        free_read_example: async ( a ) => {
+            const { struct } = a
+            return { struct }
+        },
+        free_read_cid: async ( a ) => {
+            const { struct } = a
+            return { struct }
+        }
+    }
+};
+
+export { schema }
+
+
+================================================
+FILE: tests/schemas/v1.2.0/x402/ping.mjs
+================================================
+const schema = {
+    namespace: "x402",
+    name: "x402 Experimental MCP Interface",
+    description: "A test schema for verifying free and paid route behavior under FlowMCP v1.2.0",
+    docs: ["https://example.com/x402/docs"],
+    tags: [],
+    flowMCP: "1.2.0",
+    root: "https://api.x402.test/v1",
+    requiredServerParams: [],
+    headers: {},
+    routes: {
+        free_ping: {
+            requestMethod: "GET",
+            description: "Simple free route to verify server responsiveness",
+            route: "/ping",
+            parameters: [],
+            tests: [ { _description: "Basic ping test" } ],
+            modifiers: [ { phase: "execute", handlerName: "free_ping" } ]
+        },
+        paid_ping: {
+            requestMethod: "GET",
+            description: "Simulated paid route to test vault access",
+            route: "/vault/item",
+            parameters: [],
+            tests: [ { _description: "Basic paid ping test" } ],
+            modifiers: [ { phase: "execute", handlerName: "paid_ping" } ]
+        }
+    },
+    handlers: {
+        free_ping: async ({ struct, payload }) => {
+            struct.data = {
+                method: "free_ping",
+                status: "alive",
+                version: "x402-experiment",
+                time: new Date().toISOString()
+            };
+            struct.status = true;
+            return { struct, payload };
+        },
+        paid_ping: async ({ struct, payload }) => {
+            struct.data = {
+                method: "paid_ping",
+                itemId: "XYZ00001",
+                content: "Encrypted payload or structured data here",
+                access_level: "licensed",
+                metadata: {
+                    retrieved_at: new Date().toISOString(),
+                    source: "x402-vault-test"
+                }
+            };
+            struct.status = true;
+            return { struct, payload };
+        }
+    }
+};
+
+
+export { schema }
+
+
+================================================
+FILE: .github/test-on-release.mjs
+================================================
+import { RemoteServer } from 'mcpServers'
+import { FlowMCP } from 'flowmcp'
+import { ServerManager } from './../tests/helpers/ServerManager.mjs'
+
+import { X402Middleware } from './../src/index.mjs'
+
+import { schema as ping } from './../tests/schemas/v1.2.0/x402/ping.mjs'
+import { schema as pinataRead } from './../tests/schemas/v1.2.0/pinata/read.mjs'
+
+
+const env = {
+    'envPath': './.github/.example.env',
+    'schemaPath': './../../../tests/schemas/v1.2.0/',
+    'envSelection': [
+        [ 'facilitatorPrivateKey', 'ACCOUNT_DEVELOPMENT2_PRIVATE_KEY' ],
+        [ 'payTo1',                'ACCOUNT_DEVELOPMENT2_PUBLIC_KEY'  ],
+        [ 'serverProviderUrl',     'BASE_SEPOLIA_ALCHEMY_HTTP'        ]
+    ]
+}
+
+const cfg = {
+    'routePath': '/x402',
+    'chainId': 84532,
+    'chainName': 'base-sepolia',
+    'restrictedCalls': [
+        {
+            'method': 'tools/call',
+            'name': 'paid_ping_x402',  // 'get_protocols_defillama',
+            'activePaymentOptions': [ 'usdc-sepolia' ],
+        }
+    ],
+    'paymentOptions': {
+        'usdc-sepolia': { 
+            'contractId': 'usdc-sepolia',
+            'maxAmountRequired': '0.01',
+            'payTo': '{{payTo1}}',
+        }
+    },
+    'contracts': {
+        'usdc-sepolia': {
+            'domainName': 'USDC',
+            'address': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            'assetType': 'erc20',
+            'decimals': 6
+        }
+    }
+}
+
+
+const { envPath, envSelection, schemaPath } = env
+const { routePath, chainId, chainName, restrictedCalls, paymentOptions, contracts } = cfg
+
+const { managerVersion } = ServerManager
+    .getPackageVersion()
+const { envObject } = ServerManager
+    .getEnvObject( { envPath } )
+let { x402Credentials, privateKey: x402PrivateKey } = ServerManager
+    .getX402Credentials( { envPath, envSelection } )
+x402PrivateKey = process.env.ACCOUNT_DEVELOPMENT2_PRIVATE_KEY
+/*
+    const { arrayOfSchemas } = await ServerManager
+        .getArrayOfSchemas( { schemaPath } )
+*/
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { arrayOfSchemas: [ ping, pinataRead ], envObject } )
+const remoteServer = new RemoteServer( { 'silent': false } )
+const app = remoteServer.getApp()
+const middleware = await X402Middleware
+    .create( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
+app.use( ( await middleware ).mcp() )
+app.get( routePath, ( _, res ) => res.send( `X402 Remote Server v${managerVersion} is running!` ) )
+
+remoteServer.addActivationPayloads( { activationPayloads, routePath, transportProtocols: [ 'sse' ] } )
+console.log( 'Success' )
+process.exit( 0 )
+
+
+
+================================================
+FILE: .github/.example.env
+================================================
+ACCOUNT_DEVELOPMENT2_PRIVATE_KEY=
+ACCOUNT_DEVELOPMENT2_PUBLIC_KEY=0xxyz
+BASE_SEPOLIA_ALCHEMY_HTTP=https://sepolia.base.org
+
+
+================================================
+FILE: .github/workflows/test-on-release.yml
+================================================
+name: Node Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    environment: test-on-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run plain test
+        run: node .github/test-on-release.mjs
+        env:
+          ACCOUNT_DEVELOPMENT2_PRIVATE_KEY: ${{ secrets.ACCOUNT_DEVELOPMENT2_PRIVATE_KEY }}
+
+

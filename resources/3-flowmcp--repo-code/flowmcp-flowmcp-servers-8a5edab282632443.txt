@@ -1,0 +1,1794 @@
+Directory structure:
+└── flowmcp-flowmcp-servers/
+    ├── README.md
+    ├── example-stateless.mjs
+    ├── LICENSE
+    ├── package.json
+    ├── spec.yaml
+    ├── .example.env
+    ├── src/
+    │   ├── index.mjs
+    │   ├── deploy/
+    │   │   ├── Advanced.mjs
+    │   │   └── Single.mjs
+    │   ├── servers/
+    │   │   ├── LocalServer.mjs
+    │   │   └── RemoteServer.mjs
+    │   └── task/
+    │       ├── Event.mjs
+    │       └── Parameters.mjs
+    ├── tests/
+    │   ├── claude/
+    │   │   ├── README.md
+    │   │   └── start.mjs
+    │   ├── deploy/
+    │   │   ├── deploy-multiple-simple.mjs
+    │   │   ├── deploy-single-dynamic.mjs
+    │   │   └── deploy-single-simple.mjs
+    │   ├── others/
+    │   │   └── argv-remote.mjs
+    │   └── server/
+    │       ├── local-server-module.mjs
+    │       ├── local-server-plain.mjs
+    │       ├── remote-server-events.mjs
+    │       └── remote-server.mjs
+    ├── .do/
+    │   └── deploy.template.yaml
+    └── .github/
+        ├── test-on-release.mjs
+        └── workflows/
+            └── test-on-release.yml
+
+================================================
+FILE: README.md
+================================================
+# FlowMCP Server
+
+This repository provides two server implementations compatible with the **FlowMCP framework**:
+
+* 🖥 **LocalServer** — for local, stdio-based execution
+* 🌐 **RemoteServer** — for network-based usage via HTTP and SSE
+
+---
+
+## Quickstart 
+
+Deploy with DigitalOcean
+
+> An autodeploy is only available for a stateless server (streamableHTTP) . 
+
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/flowmcp/flowmcp-servers/tree/main)
+
+
+
+## 🖥 Local Server
+
+The `LocalServer` is designed for local workflows, using standard input/output streams. It is ideal for CLI tools, testing, and development environments.
+
+### ✅ Features
+
+* Lightweight and dependency-free I/O via stdin/stdout
+* Fully supports `FlowMCP.activateServerTools(...)`
+* Uses `StdioServerTransport`
+
+### 🚀 Example Usage
+
+```js
+import { LocalServer } from 'flowmcp-server'
+import { FlowMCP } from 'flowmcp'
+import { SchemaImporter } from 'schemaimporter'
+
+const schemaList = await SchemaImporter.get( { withSchema: true } )
+const arrayOfSchemas = schemaList.map(({ schema }) => schema)
+
+const { activationPayloads } = FlowMCP.prepareActivations({ arrayOfSchemas })
+
+const localServer = new LocalServer({ silent: true })
+localServer.addActivationPayloads({ activationPayloads })
+
+await localServer.start()
+```
+
+### 🔧 Configuration
+
+```js
+localServer.setConfig({
+  overwrite: {
+    serverDescription: {
+      name: 'My Local Server',
+      description: 'CLI test server',
+      version: '1.2.2'
+    }
+  }
+})
+```
+
+---
+
+## 🌐 Remote Server
+
+The `RemoteServer` provides HTTP-based access to FlowMCP schemas using various protocols. It is ideal for frontend apps, remote agents, and networked integrations.
+
+### ✅ Features
+
+* Supports 3 transport protocols:
+
+  * `statelessStreamable`
+  * `stickyStreamable`
+  * `sse` (Server-Sent Events)
+* Optional Bearer token authentication
+* Multiple routes and schemas can be activated
+* Easily configurable
+
+### 🚀 Example Usage
+
+```js
+import { RemoteServer } from 'flowmcp-server'
+import { FlowMCP } from 'flowmcp'
+
+const remoteServer = new RemoteServer({ silent: true })
+
+const { activationPayloads } = FlowMCP.prepareActivations({
+  arrayOfSchemas: [...],
+  envObject: process.env,
+  activateTags: ['example.route']
+})
+
+await remoteServer.addActivationPayloads({
+  routePath: '/api',
+  activationPayloads,
+  transportProtocols: ['sse', 'stickyStreamable'],
+  bearer: 'mysecrettoken'
+})
+
+remoteServer.start()
+```
+
+### 🔧 Configuration
+
+```js
+remoteServer.setConfig({
+  overwrite: {
+    port: 8081,
+    rootUrl: 'http://mydomain.com'
+  }
+})
+```
+
+### 📡 Supported Transport Protocols
+
+| Protocol              | Description                               |
+| --------------------- | ----------------------------------------- |
+| `sse`                 | Server-Sent Events, persistent connection |
+| `stickyStreamable`    | HTTP with reusable sessions (via headers) |
+| `statelessStreamable` | Stateless POST-based HTTP communication   |
+
+---
+
+## 🔐 Authentication (Optional)
+
+When the `bearer` option is set, incoming requests must include the following header:
+
+```
+Authorization: Bearer <TOKEN>
+```
+
+Invalid or missing tokens will result in `401 Unauthorized` or `403 Forbidden` responses.
+
+---
+
+## 📌 Compatibility
+
+* **FlowMCP Server version**: `1.2.0+`
+* **FlowMCP Schema spec version**: `1.2.2`
+
+
+================================================
+FILE: example-stateless.mjs
+================================================
+import { RemoteServer } from './src/index.mjs'
+import { SchemaImporter } from 'schema-importer'
+import { FlowMCP } from 'flowmcp'
+
+
+const schemaFilePaths = await SchemaImporter
+    .get( { 
+        'onlyWithoutImports': true,
+        'withMetaData': true, 
+        'withSchema': true 
+    } )
+const arrayOfSchemas = schemaFilePaths
+    .filter( ( { schema: { requiredServerParams } } ) => requiredServerParams.length === 0 )    
+    .map( ( { schema } ) => schema )
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { 
+        arrayOfSchemas, 
+        envObject: {}, 
+        activateTags: [],
+        includeNamespaces: [],
+        excludeNamespaces: []
+    } )
+
+const remoteServer = new RemoteServer( { silent: true } )
+remoteServer
+    .addActivationPayloads( { 
+        activationPayloads, 
+        routePath: '/stateless', 
+       // transportProtocols: [ 'statelessStreamable' ] 
+    } )
+remoteServer.start()
+
+
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+Copyright (c) 2025 αηdr3α5 ɮαηɦօlʐ3ʀ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+FILE: package.json
+================================================
+{
+  "name": "flowmcp-server",
+  "version": "1.3.2",
+  "main": "./src/index.mjs",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "jest",
+    "start:local": "node ./tests/deploy/deploy-simple.mjs --includeNamespaces= --excludeNamespaces= --activateTags= --envType=file --envPath=.example.env --serverType=local --bearerToken=1234 --port=8080 --rootUrl=http://localhost --silent=false --transportProtocols=sse --routePath=/flowmcp",
+    "start:remote": "node ./tests/deploy/deploy-simple.mjs --includeNamespaces= --excludeNamespaces= --activateTags= --envType=file --envPath=.example.env --serverType=remote --bearerToken=1234 --port=8080 --rootUrl=http://localhost --silent=false --transportProtocols=sse --routePath=/flowmcp",
+    "start:digitalocean": "node ./tests/deploy/deploy-simple.mjs --includeNamespaces= --excludeNamespaces= --activateTags= --envType=file --envPath=.example.env --serverType=remote --bearerToken=1234 --port=8080 --rootUrl=http://localhost --silent=false --transportProtocols=statelessStreamable --routePath=/flowmcp",
+    "inspector": "npx @modelcontextprotocol/inspector node tests/3-simpler-plus-see.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.2",
+    "flowmcp": "github:flowmcp/flowmcp#a1523aa60699e168a6c7b4ec923ac5ee4f15d89a"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.27.2",
+    "@modelcontextprotocol/inspector": "^0.14.3",
+    "babel-jest": "^30.0.2",
+    "jest": "^30.0.3",
+    "schemaimporter": "github:flowmcp/flowMCP-schemas#3d378b3a61452126c833d667a9189ca578813c48"
+  }
+}
+
+
+
+================================================
+FILE: spec.yaml
+================================================
+spec:
+  name: flowmcp-server-stateless
+  services:
+    - name: web
+      git:
+        repo_clone_url: https://github.com/FlowMCP/flowmcp-servers
+        branch: main
+      deploy_on_push: true
+      build_command: npm install
+      run_command: npm run start:digitalocean
+      environment_slug: node-js
+      instance_size_slug: basic-xxs
+      instance_count: 1
+      routes:
+        - path: /
+
+
+================================================
+FILE: .example.env
+================================================
+BLOCKNATIVE_API_KEY=a
+BSCSCAN_API_KEY=b
+CMC_API_KEY=c
+COINCAP_API_KEY=d
+COINSTATS_API_KEY=e
+CRYPTOPANIC_API_KEY=f
+DUNE_API_KEY=g
+ETHERSCAN_API_KEY=h
+INFURA_API_KEY=i
+MORALIS_API_KEY=j
+NEWSDATA_API_KEY=k
+SANTIMENT_API_KEY=l
+SOLANA_TRACKER_API_KEY=m
+SOLSCAN_API_KEY=n
+SOLSNIFFER_API_KEY=o
+THEGRAPH_API_KEY=p
+TWITTER_BEARER_TOKEN=q
+
+
+================================================
+FILE: src/index.mjs
+================================================
+import { LocalServer } from './servers/LocalServer.mjs'
+import { RemoteServer } from './servers/RemoteServer.mjs'
+import { Parameters } from './task/Parameters.mjs'
+import { FlowMCP } from 'flowmcp'
+
+import { Deploy } from './deploy/Single.mjs'
+import { DeployAdvanced } from './deploy/Advanced.mjs'
+
+
+export { LocalServer, RemoteServer, Parameters, Deploy, DeployAdvanced }
+
+
+================================================
+FILE: src/deploy/Advanced.mjs
+================================================
+import { RemoteServer } from '../servers/RemoteServer.mjs'
+import { FlowMCP } from 'flowmcp'
+
+
+class DeployAdvanced {
+    static #server
+
+
+    static init( { silent } ) {
+        this.#server = new RemoteServer( { silent } )
+        const app = this.#server.getApp()
+        const mcps = this.#server.getMcps()
+        const events = this.#server.getEvents()
+        const server = this.#server
+
+        return { serverType: 'multipleRoutes', app, mcps, events, argvs: null, server  }
+    }
+
+
+    static start( { routes, arrayOfSchemas, envObject, rootUrl, port } ) {
+        const { routesActivationPayloads } = RemoteServer
+            .prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } )
+        this.#server
+            .start( { routesActivationPayloads, rootUrl, port } )
+        return true
+    }
+}
+
+
+export { DeployAdvanced }
+
+
+================================================
+FILE: src/deploy/Single.mjs
+================================================
+import { Parameters } from '../task/Parameters.mjs'
+import { FlowMCP } from 'flowmcp'
+import { RemoteServer } from '../servers/RemoteServer.mjs'
+
+
+class Deploy {
+    static #serverClass
+
+
+    static init( { argv, processEnv, arrayOfSchemas } ) {
+        const { argvs, envObject } = Parameters
+            .getParameters( { argv, processEnv, arrayOfSchemas } )
+        const { serverType, activateTags, excludeNamespaces, includeNamespaces } = argvs
+  
+        const { filteredArrayOfSchemas } = FlowMCP
+            .filterArrayOfSchemas( { 
+                arrayOfSchemas, 
+                includeNamespaces, 
+                excludeNamespaces, 
+                activateTags 
+            } )
+
+        const { activationPayloads } = FlowMCP
+            .prepareActivations( { 
+                'arrayOfSchemas': filteredArrayOfSchemas,
+                envObject
+            } )
+
+        let app, mcps, events
+        if( serverType === 'local' ) {
+            const { app: _a, mcps: _m, events: _e } = Deploy.#localServer( { argvs, activationPayloads } )
+            app = _a; mcps = _m; events = _e
+        } else if( serverType === 'remote' ) {
+            const { app: _a, mcps: _m, events: _e } = Deploy.#remoteServer( { argvs, arrayOfSchemas, envObject } )
+            app = _a; mcps = _m; events = _e
+        } else {
+            throw new Error( `Unknown server type: ${serverType}` )
+        }
+
+        return { serverType, app, mcps, events, argvs  }
+    }
+
+
+    static async start() {
+        const { type, server } = this.#serverClass
+        if( type === 'local' ) {
+            await server.start()
+            !server.silent ? console.warn( 'Local Server started successfully.' ) : ''
+        } else if( type === 'remote' ) {
+            // server.start()
+            !server.silent ? console.log( 'Remote Server started successfully.' ) : ''
+        } else {
+            throw new Error( `Unknown server type: ${type}` )
+        }
+
+        return true
+    }
+
+
+    static async #localServer( { argvs, activationPayloads } ) {
+        const { silent } = argvs
+        !silent ? console.log( 'Starting Local Server...' ) : ''
+        const localServer = new LocalServer( { silent } )
+        localServer
+            .addActivationPayloads( { activationPayloads } )
+        this.#serverClass = { 'type': 'local', 'server': localServer }
+        const app = localServer.getApp()
+    
+        return { app, mcps: null, events: null }
+    }
+
+
+    static #remoteServer( { argvs, arrayOfSchemas, envObject } ) {
+        const { silent, transportProtocols } = argvs
+        const remoteServer = new RemoteServer( { silent } )
+        const app = remoteServer.getApp()
+        const mcps = remoteServer.getMcps()
+        const events = remoteServer.getEvents()
+        this.#serverClass = { 'type': 'remote', 'server': remoteServer }
+
+        const { includeNamespaces, excludeNamespaces, activateTags, routePath, bearerToken } = argvs
+        const routes = transportProtocols
+            .map( ( protocol ) => {
+                return { includeNamespaces, excludeNamespaces, activateTags, routePath, protocol, bearerToken }
+            } )
+
+        const { routesActivationPayloads } = RemoteServer
+            .prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } )
+        remoteServer
+            .start( { routesActivationPayloads } )
+
+        return { app, mcps, events }
+    }
+}
+
+
+export { Deploy }
+
+
+================================================
+FILE: src/servers/LocalServer.mjs
+================================================
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+
+import { FlowMCP } from 'flowmcp'
+
+
+class LocalServer {
+    #server
+    #silent
+    #config
+
+
+    constructor( { silent = false } = {} ) {
+        this.#silent = silent || false
+        this.#config = { 
+            'serverDescription': {
+                'name': 'Local Server',
+                'description': 'A local Model Context Protocol server',
+                'version': '1.2.2', 
+            }
+        }
+
+        const { serverDescription } = this.#config
+        this.#server = new McpServer( serverDescription )
+
+        return true
+    }
+
+
+     setConfig( { overwrite } ) {
+        const allowedKeys = [ 'serverDescription' ]
+        if( !Object.keys( overwrite ).every( key => allowedKeys.includes( key ) ) ) {
+            throw new Error( `Invalid keys in config: ${userKeys.filter( key => !allowedKeys.includes( key ) ).join( ', ' )}` )
+        }
+        Object
+            .entries( overwrite )
+            .forEach( ( [ key, value ] ) => {
+                this.#config[ key ] = value
+            } )
+
+        return true
+    }
+
+
+    getApp() {
+        return this.#server
+    }
+
+
+    addActivationPayloads( { activationPayloads } ) {
+        activationPayloads
+            .forEach( ( { serverParams, schema, activateTags } ) => {
+                FlowMCP
+                    .activateServerTools( {
+                        'server': this.#server, 
+                        schema, 
+                        serverParams, 
+                        activateTags, 
+                        'silent': this.#silent 
+                    } )
+            } )
+
+        return true
+    }
+
+
+    async start() {
+        const transport = new StdioServerTransport()
+        try { await this.#server.connect( transport ) } 
+        catch( err ) { console.error( 'Failed to start server:', err ) }
+    }
+}
+
+export { LocalServer }
+
+
+================================================
+FILE: src/servers/RemoteServer.mjs
+================================================
+// version 2 - with optional port and rootUrl in start()
+
+import express from 'express'
+import { FlowMCP } from 'flowmcp'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+
+import { Event } from './../task/Event.mjs'
+
+
+class RemoteServer {
+    #app
+    #mcps = {}
+    #silent
+    #config
+    #events
+    #routeAuth = {}
+
+
+    constructor( { silent = false } ) {
+        this.#silent = silent
+        this.#config = {
+            rootUrl: 'http://localhost',
+            port: 8080,
+            suffixes: {
+                sse: '/sse',
+                streamable: '/streamable'
+            },
+            serverDescription: {
+                name: 'Remote Server',
+                description: 'A remote Model Context Protocol server',
+                version: '1.0.0'
+            }
+        }
+        this.#events = new Event()
+
+        this.#app = express()
+        this.#app.use( express.json() )
+        this.#app.use( this.#bearerAuthMiddleware.bind( this ) )
+    }
+
+
+    setConfig( { overwrite } ) {
+        const allowedKeys = [ 'rootUrl', 'port', 'suffixes' ]
+
+        if( !Object.keys( overwrite ).every( ( key ) => allowedKeys.includes( key ) ) ) {
+            throw new Error( `Invalid keys in config: ${Object.keys( overwrite ).filter( ( key ) => !allowedKeys.includes( key ) ).join( ', ' )}` )
+        }
+
+        Object
+            .entries( overwrite )
+            .forEach( ( [ key, value ] ) => {
+                this.#config[ key ] = value
+            } )
+
+        return true
+    }
+
+
+    getEvents() {
+        return this.#events
+    }
+
+
+    getApp() {
+        return this.#app
+    }
+
+
+    getMcps() {
+        return this.#mcps
+    }
+
+
+    static prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } ) {
+        const routesActivationPayloads = routes
+            .reduce( ( acc, route ) => {
+                const { includeNamespaces: iN, excludeNamespaces: eN, activateTags: aT, routePath, protocol, bearerToken } = route
+                const { includeNamespaces, excludeNamespaces, activateTags } = [
+                    [ 'includeNamespaces', iN ],
+                    [ 'excludeNamespaces', eN ],
+                    [ 'activateTags'     , aT ]
+                ]
+                    .reduce( ( acc, [ key, value ] ) => {
+                        acc[ key ] = value ?? []
+                        return acc
+                    }, {} )
+        
+                const { filteredArrayOfSchemas } = FlowMCP.filterArrayOfSchemas( { arrayOfSchemas, includeNamespaces, excludeNamespaces, activateTags } )
+                if( filteredArrayOfSchemas.length === 0 ) { throw new Error( `No schemas found for route: ${JSON.stringify( route )}` ) }
+                    
+                const { activationPayloads } = FlowMCP.prepareActivations( { arrayOfSchemas: filteredArrayOfSchemas, envObject } )
+                acc.push( { routePath, protocol, bearerToken, activationPayloads } )
+
+                return acc
+            }, [] )
+
+        return { routesActivationPayloads }
+    }
+
+
+    start( { routesActivationPayloads, rootUrl, port } ) {
+        const finalRootUrl = rootUrl !== undefined ? rootUrl : this.#config.rootUrl
+        const finalPort = port !== undefined ? port : this.#config.port
+
+        const { status, messages } = RemoteServer.#validationStart( {
+            routesActivationPayloads,
+            rootUrl: finalRootUrl,
+            port: finalPort
+        } )
+        if( !status ) {
+            throw new Error( `Validation failed: ${messages.join( ', ' )}` )
+        }
+
+        routesActivationPayloads
+            .forEach( ( { includeNamespaces, routePath, protocol, bearerToken, activationPayloads } ) => {
+                this.#mcps[ routePath ] = { sessionIds: {}, activationPayloads }
+
+                if( typeof bearerToken === 'string' && bearerToken !== '' ) {
+                    this.#routeAuth[ routePath ] = bearerToken.toLowerCase()
+                }
+
+                this.#initRoute( { protocol, routePath } )
+            } )
+
+        this.#app.listen( finalPort, () => {
+            if( !this.#silent ) {
+                console.log( `\n🚀 Server is running on ${finalRootUrl}:${finalPort}` )
+                console.log( '📜 Available Routes:' )
+
+                routesActivationPayloads
+                    .forEach( ( { routePath, protocol, bearerToken, activationPayloads } ) => {
+                        const suffix = this.#config.suffixes[ protocol ] || ''
+                        const tokenMsg = ( typeof bearerToken === 'string' && bearerToken !== '' )
+                            ? `Authorization:  Bearer ${bearerToken}`
+                            : 'Authorization:  '
+
+                        const schemaCount = ( activationPayloads || [] ).length
+                        const toolsCount = activationPayloads
+                            .reduce( ( acc, { schema } ) => {
+                                const count = Object.keys( schema.routes || {} ).length
+                                return acc + count
+                            }, 0 )
+                        const n = activationPayloads
+                            .map( ( { schema } ) => schema.namespace )
+                            .filter( ( v, i, a ) => a.indexOf( v ) === i )
+
+                        console.log( `- URL:            ${finalRootUrl}:${finalPort}${routePath}${suffix}` )
+                        console.log( `  Transport Type: ${protocol}` )
+                        console.log( `  ${tokenMsg}` )
+                        console.log( `  Namespaces:     ${n.join( ', ' )}` )
+                        console.log( `  Schemas:        ${schemaCount}, Tools: ${toolsCount}` )
+
+                    } )
+            }
+        } )
+
+        return { result: true }
+    }
+
+
+    #initRoute( { protocol, routePath } ) {
+        const suffix = this.#config.suffixes[ protocol ] || '/sse'
+        const fullPath = `${routePath}${suffix}`
+
+        const authMiddleware = ( req, res, next ) => {
+            const token = this.#routeAuth[ routePath ]
+
+            if( !token ) { return next() }
+
+            const auth = req.headers[ 'authorization' ]
+            if( !auth || !auth.toLowerCase().startsWith( 'bearer ' ) || auth.split( ' ' )[ 1 ]?.toLowerCase() !== token ) {
+                res
+                    .status( 403 )
+                    .json( { error: 'Forbidden: Invalid or missing bearer token' } )
+            } else {
+                next()
+            }
+        }
+
+        if( protocol === 'sse' ) {
+            const messagesPath = `${routePath}/post`
+
+            this.#app.get( fullPath, authMiddleware, async ( req, res ) => {
+                const server = new McpServer( this.#config.serverDescription )
+                this.#mcps[ routePath ].activationPayloads
+                    .forEach( ( { schema, serverParams } ) => {
+                        FlowMCP.activateServerTools( {
+                            server,
+                            schema,
+                            serverParams,
+                            activateTags: [],
+                            silent: true
+                        } )
+                    } )
+
+                const transport = new SSEServerTransport( messagesPath, res )
+                const sessionId = transport._sessionId
+
+                this.#mcps[ routePath ].sessionIds[ sessionId ] = {
+                    server,
+                    transport
+                }
+
+                if( !this.#silent ) {
+                    console.log( `📱 Session created: ${sessionId}` )
+                }
+
+                this.#sendEvent( { channelName: 'sessionCreated', message: { protocol, routePath, sessionId } } )
+
+                res.on( 'close', () => {
+                    delete this.#mcps[ routePath ].sessionIds[ sessionId ]
+
+                    if( !this.#silent ) {
+                        console.log( `❌ Session closed: ${sessionId}` )
+                    }
+
+                    this.#sendEvent( { channelName: 'sessionClosed', message: { protocol, routePath, sessionId } } )
+                } )
+
+                await server.connect( transport )
+            } )
+
+            this.#app.post( messagesPath, authMiddleware, async ( req, res ) => {
+                const { sessionId } = req.query
+                const entry = this.#mcps[ routePath ].sessionIds[ sessionId ]
+
+                if( !entry ) {
+                    res
+                        .status( 400 )
+                        .send( 'Invalid sessionId' )
+
+                    return
+                }
+
+                const method = req.body?.method || 'unknown'
+                const toolName = req.body?.params?.name
+
+                if( !this.#silent ) {
+                    console.log( `⚙️ Tool called: method=${method}, toolName=${toolName}, sessionId=${sessionId}` )
+                }
+
+                this.#sendEvent( { channelName: 'callReceived', message: { protocol, routePath, sessionId, method, toolName } } )
+
+                await entry.transport.handlePostMessage( req, res, req.body )
+            } )
+        }
+
+        if( protocol === 'streamable' ) {
+            this.#app.post( fullPath, authMiddleware, async ( req, res ) => {
+                const server = new McpServer( this.#config.serverDescription )
+
+                this.#mcps[ routePath ].activationPayloads
+                    .forEach( ( { schema } ) => {
+                        FlowMCP.activateServerTools( {
+                            server,
+                            schema,
+                            serverParams: {},
+                            activateTags: [],
+                            silent: true
+                        } )
+                    } )
+
+                const transport = new StreamableHTTPServerTransport( {} )
+
+                const sessionId = 'stateless'
+
+                this.#mcps[ routePath ].sessionIds[ sessionId ] = {
+                    server,
+                    transport
+                }
+
+                const method = req.body?.method || 'unknown'
+                const toolName = req.body?.params?.name
+
+                this.#sendEvent( { channelName: 'callReceived', message: { protocol, routePath, sessionId, method, toolName } } )
+
+                await server.connect( transport )
+                await transport.handleRequest( req, res, req.body )
+
+                delete this.#mcps[ routePath ].sessionIds[ sessionId ]
+            } )
+        }
+
+        return { result: true }
+    }
+
+
+    #bearerAuthMiddleware( req, res, next ) {
+        next()
+    }
+
+
+    #sendEvent( { channelName, message } ) {
+        this.#events.sendEvent( { channelName, message } )
+
+        return true
+    }
+
+
+    static #validationStart( { routesActivationPayloads, rootUrl, port } ) {
+        const struct = { status: false, messages: [] }
+
+        if( routesActivationPayloads === undefined ) {
+            struct[ 'messages' ].push( 'routesActivationPayloads: Is required' )
+        } else if( !Array.isArray( routesActivationPayloads ) ) {
+            struct[ 'messages' ].push( 'routesActivationPayloads: Must be an array' )
+        }
+
+        if( rootUrl !== undefined && typeof rootUrl !== 'string' ) {
+            struct[ 'messages' ].push( 'rootUrl: Must be a string' )
+        }
+
+        if( port !== undefined && typeof port !== 'number' ) {
+            struct[ 'messages' ].push( 'port: Must be a number' )
+        }
+
+        if( struct[ 'messages' ].length > 0 ) {
+            return struct
+        }
+
+        routesActivationPayloads
+            .forEach( ( entry, index ) => {
+                const { routePath, protocol, bearerToken, activationPayloads } = entry
+                const specs = [
+                    [ 'routePath', routePath, 'string', null ],
+                    [ 'protocol', protocol, 'string', [ 'sse', 'streamable' ] ],
+                    [ 'activationPayloads', activationPayloads, 'object', null ]
+                ]
+
+                specs
+                    .forEach( ( [ key, value, type, list ] ) => {
+                        if( value === undefined || value === null ) {
+                            struct[ 'messages' ].push( `routesActivationPayloads[${index}].${key}: Is required` )
+                        } else if( type === 'object' && !Array.isArray( value ) ) {
+                            struct[ 'messages' ].push( `routesActivationPayloads[${index}].${key}: Must be an array` )
+                        } else if( type === 'string' && typeof value !== 'string' ) {
+                            struct[ 'messages' ].push( `routesActivationPayloads[${index}].${key}: Must be a string` )
+                        } else if( type === 'string' && list !== null && !list.includes( value ) ) {
+                            struct[ 'messages' ].push( `routesActivationPayloads[${index}].${key}: Invalid value "${value}". Allowed are ${list.join( ', ' )}` )
+                        }
+                    } )
+
+                if( bearerToken !== null && typeof bearerToken !== 'string' ) {
+                    struct[ 'messages' ].push( `routesActivationPayloads[${index}].bearerToken: Must be a string or null` )
+                }
+            } )
+
+        struct[ 'status' ] = struct[ 'messages' ].length === 0
+
+        return struct
+    }
+}
+
+
+export { RemoteServer }
+
+
+
+================================================
+FILE: src/task/Event.mjs
+================================================
+import { EventEmitter } from 'events'
+
+
+class Event extends EventEmitter {
+    constructor() {
+        super()
+        this.setMaxListeners( 100 )
+    }
+
+    sendEvent( { channelName, message } ) {
+        this.emit( channelName, message )
+        return true
+    }   
+}
+
+
+export { Event }
+
+
+================================================
+FILE: src/task/Parameters.mjs
+================================================
+import fs from 'fs'
+
+
+class Parameters {
+    static getArgvConfig( { type } ) {
+        const schemaFilters = [
+            [ '--includeNamespaces=',  'includeNamespaces',  'array',   []                              ],
+            [ '--excludeNamespaces=',  'excludeNamespaces',  'array',   []                              ],
+            [ '--activateTags=',       'activateTags',       'array',   []                              ]
+        ]
+
+        const envParameters = [
+            [ '--envType=',            'envType',            'string',  'file' /* 'processEnv' */      ],
+            [ '--envPath=',            'envPath',            'string',  '.example.env'                  ]
+        ]
+
+        const serverParameters = [
+            [ '--serverType=',         'serverType',         'string',  'remote'  /* remote */                        ]
+        ]
+
+        const localServerParameters = [
+        ]
+
+        const remoteServerParameters = [
+            [ '--bearerToken='       , 'bearerToken'       , 'string' , null                      ],
+            [ '--port='              , 'port'              , 'number' , 8080                      ],
+            [ '--rootUrl='           , 'rootUrl'           , 'string' , 'http://localhost'        ],
+            [ '--silent='            , 'silent'            , 'boolean', false                     ],
+            [ '--transportProtocols=', 'transportProtocols', 'array'  , [ 'sse', 'streamable' ]   ],
+            [ '--routePath='         , 'routePath'         , 'string' , '/flowmcp'                ]
+        ]
+
+
+        const config = {
+            'default': [
+                ...schemaFilters,
+                ...envParameters,
+                ...serverParameters,
+                // ...localServerParameters,
+                // ...remoteServerParameters
+            ],
+            'local': [
+                ...localServerParameters
+            ],
+            'remote': [
+                ...remoteServerParameters
+            ]
+        }
+
+        if( !config[ type ] ) {
+            throw new Error( `Unknown type: ${type}. Available types: ${Object.keys( config ).join( ', ' )}` )
+        }
+
+
+        return config[ type ]
+    }
+
+
+    static getParameters( { argv, processEnv, arrayOfSchemas } ) {
+        let argvs = {}
+        let envObject = {}
+        {
+            const { status, messages, result } = Parameters
+                .#getServerArgvParameters( { argv, type: 'default' } )
+            if( !status ) { Parameters.#printError( { messages } ) }
+            argvs = result
+            const { serverType } = argvs
+            const { status: s2, messages: m2, result: r2 } = Parameters
+                .#getServerArgvParameters( { argv, type: serverType } )
+            if( !s2 ) { Parameters.#printError( { messages: m2 } ) }
+            argvs = { ...argvs, ...r2 }
+        }
+
+        {
+            const { envType, envPath } = argvs
+            const { status, messages, result } = Parameters.#getEnvObject( { envType, envPath, processEnv, arrayOfSchemas } )
+            if( !status ) { Parameters.#printError( { messages } ) }
+            envObject = result
+        }
+
+        return { argvs, envObject }
+    }
+
+
+    static #getServerArgvParameters( { argv, type } ) {   
+        const messages = []
+        let result = {}
+        try {
+            result = Parameters
+                .getArgvConfig( { type } )
+                .reduce( ( acc, [ prefix, key, type, _defaultValue ] ) => {
+                    let value = argv
+                        .find( ( arg ) => arg.startsWith( prefix ) )
+                    if( value === undefined ) {
+                        acc[ key ] = _defaultValue
+                        return acc
+                    }
+                    value = value.replace( prefix, '' ).trim()
+                    if( type === 'array' ) { value = value.split( ',' ).filter( Boolean ) }
+                    else if( type === 'number' ) { value = Number( value ) } 
+                    else if( type === 'boolean' ) { value = value === 'true' }
+
+                    acc[ key ] = value
+
+                    return acc
+                }, {} )
+        } catch( e ) {
+            messages.push( `Error parsing arguments: ${e.message}` )
+        }         
+
+        return { status: messages.length === 0, messages, result }
+    }
+
+
+    static #getEnvObject( { envType, envPath, processEnv, arrayOfSchemas } ) {
+        const messages = []
+        const allParams = Array
+            .from(
+                arrayOfSchemas
+                    .reduce( 
+                        ( acc, { requiredServerParams } ) => { acc.add( ...requiredServerParams ); return acc }, 
+                        new Set() 
+                    )
+            )
+            .filter( ( param ) => param !== undefined && param !== null && param !== '' )
+
+        let loadedObject = {}
+        switch( envType ) {
+            case 'file': {
+                loadedObject = fs
+                    .readFileSync( envPath, 'utf-8' )
+                    .split( '\n' )
+                    .reduce( ( acc, line ) => {
+                        const [ key, value ] = line.split( '=' )
+                        if( key && value ) { acc[ key.trim() ] = value.trim() }
+                        return acc
+                    }, {} )
+                break
+            }
+            case 'processEnv': {
+                loadedObject = processEnv
+                break
+            }
+            default: {
+                messages.push( `Unknown envType: ${envType}` )
+            }
+        }
+
+        if( messages.length > 0 ) { return { status: false, messages, result: {} } }
+        const envObject = allParams
+            .reduce( ( acc, param ) => {
+                if( loadedObject[ param ] !== undefined ) { acc[ param ] = loadedObject[ param ] } 
+                else { messages.push( `Parameter "${param}" is not defined in the environment.` ) }
+                return acc
+            }, {} )
+
+        return { status: messages.length === 0, messages, result: envObject }
+    }
+
+
+    static #printError( { messages } ) {
+        throw new Error(
+            `.getParameters: Error: ${messages.join( '\n' )}`
+        )
+    }
+}
+
+
+export { Parameters }
+
+
+================================================
+FILE: tests/claude/README.md
+================================================
+# How to setup
+
+
+```js
+{
+  "globalShortcut": "",
+  "mcpServers": {
+    "FlowMCP": {
+      "command": "node",
+      "args": [
+        "..../tests/claude/start.mjs",
+        "--includeNamespaces=",
+        "--excludeNamespaces=",
+        "--activateTags=",
+        "--envType=processEnv",
+        "--serverType=local",
+        "--silent=true"
+      ],
+      "env": {
+        "SOLANA_TRACKER_API_KEY":"",
+        "MORALIS_API_KEY":"",
+        "ETHERSCAN_API_KEY":"",
+        "CRYPTOPANIC_API_KEY":"",
+        "DUNE_API_KEY":"",
+        "NEWSDATA_API_KEY":"",
+        "SANTIMENT_API_KEY":"",
+        "SOLSNIFFER_API_KEY":"",
+        "THEGRAPH_API_KEY":"",
+        "CMC_API_KEY":"",
+        "BITQUERY_ID":"",
+        "BITQUERY_API_KEY":"",
+        "ALCHEMY_API_KEY":"",
+        "INFURA_API_KEY":"",
+        "SOLSCAN_API_KEY":"",
+        "BSCSCAN_API_KEY":"",
+        "COINCAP_API_KEY":"",
+        "BLOCKNATIVE_API_KEY":"",
+        "COINSTATS_API_KEY": "",
+        "TWITTER_BEARER_TOKEN": ""
+      }
+    }
+  }
+}
+```
+
+
+================================================
+FILE: tests/claude/start.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+import { Deploy } from '../../src/index.mjs'
+
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { serverType, app, mcps, events, argv } = Deploy
+    .init( {
+        'argv': process.argv,
+        'processEnv': process.env,
+        arrayOfSchemas
+    } )
+
+await Deploy.start()
+
+
+================================================
+FILE: tests/deploy/deploy-multiple-simple.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+import { DeployAdvanced } from '../../src/index.mjs'
+import fs from 'fs'
+
+
+function getEnvObject( { envPath } ) {
+    let envObject = fs
+        .readFileSync( envPath, 'utf-8' )
+        .split( '\n' )
+        .reduce( ( acc, line ) => {
+            const [ key, value ] = line.split( '=' )
+            if( key && value ) { acc[ key.trim() ] = value.trim() }
+            return acc
+        }, {} )
+
+    return { envObject }
+}
+
+
+const config = {
+    'silent': false, // optional, default: false
+    'envPath': './../../.env',
+    'rootUrl': 'http://localhost', // optional
+    'port': 8080, // optional
+    'routes': [
+        { 
+            includeNamespaces: [ 'luksoNetwork' ],
+            excludeNamespaces: [],
+            activateTags: [],
+            routePath: '/one',
+            protocol: 'sse',
+            bearerToken: null 
+        },
+        { 
+            includeNamespaces: [ 'defillama' ],
+            excludeNamespaces: [],
+            activateTags: [],
+            routePath: '/two',
+            protocol: 'sse',
+            bearerToken: null
+        }
+    ]
+}
+
+
+const { envPath, routes, silent, rootUrl, port } = config
+const { envObject } = getEnvObject( { envPath } )
+const { serverType, app, mcps, events, argv, server } = DeployAdvanced
+    .init( { silent } )
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+app.get( '/', ( req, res ) => {
+    res.send( `Test 123` )
+} )
+
+events
+    .on( 'sessionCreated', ( { protocol, routePath, sessionId } ) => {
+        console.log( `Session created: Protocol: ${protocol}, Route Path: ${routePath}, Session ID: ${sessionId}` )
+        return true
+    } )
+    .on( 'sessionClosed', ( { protocol, routePath, sessionId } ) => {
+        console.log( `Session closed: Protocol: ${protocol}, Route Path: ${routePath}, Session ID: ${sessionId}` )
+        return true
+    } )
+
+DeployAdvanced
+    .start( { routes, arrayOfSchemas, envObject, rootUrl, port } )
+
+
+
+================================================
+FILE: tests/deploy/deploy-single-dynamic.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+import { Deploy } from '../../src/index.mjs'
+
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { serverType, app, mcps, events, argv } = Deploy
+    .init( {
+        'argv': process.argv,
+        'processEnv': process.env,
+        arrayOfSchemas
+    } )
+
+events
+    .on( 'sessionCreated', ( { protocol, sessionId } ) => {
+        console.log( `Session created: Protocol: ${protocol}, Session ID: ${sessionId}` )
+        Object
+            .entries( mcps[ protocol ]['sessionIds'][ sessionId ]['tools'] )
+            .forEach( ( [ toolName, tool ], index ) => {
+                if( index === 0 ) {
+                    tool.update( { 'name': 'New Name', 'description': 'New Description' } )
+                    return 
+                }
+                tool.disable()
+            } )
+        return true
+    } )
+    .on( 'callReceived', ( { protocol, sessionId, method, toolName } ) => {
+        console.log( `Call: Protocol: ${protocol}, Session ID: ${sessionId}, method ${method}, toolName: ${toolName}` )
+    } )
+    .on( 'sessionClosed', ( { protocol, sessionId } ) => {
+        console.log( `Session closed: Protocol: ${protocol}, Session ID: ${sessionId}` )
+    } )
+
+if( serverType === 'remote' ) {
+    app.get( '/', ( req, res ) => { res.send( 'ABC' ) } )
+}
+
+await Deploy.start()
+
+
+================================================
+FILE: tests/deploy/deploy-single-simple.mjs
+================================================
+import { SchemaImporter } from 'schemaimporter'
+import { Deploy } from '../../src/index.mjs'
+
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { serverType, app, mcps, events, argv } = Deploy
+    .init( {
+        'argv': process.argv,
+        'processEnv': process.env,
+        arrayOfSchemas
+    } )
+
+if( serverType === 'remote' ) {
+    app.get( '/', ( req, res ) => { res.send( 'Welcome' ) } )
+}
+
+await Deploy.start()
+
+
+================================================
+FILE: tests/others/argv-remote.mjs
+================================================
+import { Parameters } from './../../src/index.mjs'
+import { RemoteServer } from './../../src/index.mjs'
+import { SchemaImporter } from 'schemaimporter'
+import { FlowMCP } from 'flowmcp'
+
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { filteredArrayOfSchemas } = FlowMCP
+    .filterArrayOfSchemas( { 
+        arrayOfSchemas, 
+        includeNamespaces: [],
+        excludeNamespaces: [],
+        activateTags: [] 
+    } )
+
+
+const { argvs, envObject } = Parameters
+    .getParameters( { 
+        'argv': process.argv,
+        'processEnv': process.env,
+        'arrayOfSchemas': filteredArrayOfSchemas,
+    } )
+
+const { 
+    activateTags,
+    bearerToken,
+    excludeNamespaces,
+    includeNamespaces,
+    routePath,
+    rootUrl,
+    port,
+    silent,
+    transportProtocols
+} = argvs
+
+if( !silent ) { 
+    console.log( 'Argv Parameters:', argvs ) 
+    console.log( 'Env Object:', envObject )
+}
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { 
+        'arrayOfSchemas': filteredArrayOfSchemas,
+        envObject
+    } )
+
+const remoteServer = new RemoteServer( { silent } )
+remoteServer
+    .setConfig( { 'overwrite': { rootUrl, port } } )
+remoteServer
+    .addActivationPayloads( { 
+        activationPayloads,
+        routePath,
+        transportProtocols,
+        bearerToken 
+    } )
+remoteServer.start()
+console.log( 'Remote Server started successfully.' )
+
+
+================================================
+FILE: tests/server/local-server-module.mjs
+================================================
+import fs from 'fs'
+
+import { FlowMCP } from 'flowmcp'
+import { SchemaImporter } from 'schemaimporter'
+
+import { LocalServer } from './../../src/index.mjs'
+
+
+function getEnvObject( { source, envPath } ) {
+    let envObject
+
+    if( source === 'unknown' ) {
+        envObject = fs
+            .readFileSync( envPath, 'utf-8' )
+            .split( '\n' )
+            .reduce( ( acc, line ) => {
+                const [ key, value ] = line.split( '=' )
+                if( key && value ) { acc[ key.trim() ] = value.trim() }
+                return acc
+            }, {} )
+    } else if( source === 'claude' ) {
+        envObject = process.env
+    } else { 
+        console.log( 'Unknown source:', source ) 
+    }
+
+    return { envObject }
+}
+
+console.log( 'Starting Local Server...' )
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: false,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const { includeNamespaces, excludeNamespaces, activateTags, source } = FlowMCP
+    .getArgvParameters( {
+        'argv': process.argv,
+        'includeNamespaces': [],
+        'excludeNamespaces': [],
+        'activateTags': [], 
+    } )
+const { envObject } = getEnvObject( { 
+    source,
+    envPath: './../../.env'
+} )
+
+const { filteredArrayOfSchemas } = FlowMCP
+    .filterArrayOfSchemas( { 
+        arrayOfSchemas, 
+        includeNamespaces, 
+        excludeNamespaces, 
+        activateTags 
+    } )
+
+const { activationPayloads } = FlowMCP
+    .prepareActivations( { 
+        'arrayOfSchemas': filteredArrayOfSchemas, 
+        envObject
+    } )
+
+const localServer = new LocalServer( { silent: true } )
+localServer
+    .addActivationPayloads( { activationPayloads } )
+await localServer.start()
+console.log( 'Local Server started successfully.' )
+
+
+
+================================================
+FILE: tests/server/local-server-plain.mjs
+================================================
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { FlowMCP } from 'flowmcp'
+
+
+const server = new McpServer( {
+    'name': 'Local Server',
+    'description': 'A local Model Context Protocol server',
+    'version': '1.2.2', 
+} )
+
+const schema = {
+    namespace: "poap",
+    name: "POAP GraphQL",
+    description: "GraphQL endpoint for accessing POAP event data and metadata",
+    docs: ["https://public.compass.poap.tech/v1/graphql"],
+    tags: ["production", "poap.getTypename"],
+    flowMCP: "1.2.0",
+    root: "https://public.compass.poap.tech/v1/graphql",
+    requiredServerParams: [],
+    headers: {
+        "content-type": "application/json"
+    },
+    routes: {
+        getTypename: {
+            requestMethod: "POST",
+            description: "Basic connectivity test to retrieve __typename from the POAP GraphQL endpoint",
+            route: "/",
+            parameters: [ { position: { key: "query", value: "query { __typename }", location: "body" }, z: { primitive: "string()", options: [] } } ],
+            tests: [ { _description: "Run GraphQL __typename test" } ],
+            modifiers: []
+        }
+    },
+    handlers: {}
+}
+
+FlowMCP
+    .activateServerTool( {
+        'server': server, 
+        schema, 
+        routeName: 'getTypename',
+        serverParams: {}, 
+        'silent': true 
+    } )
+
+const transport = new StdioServerTransport()
+server.connect( transport )
+console.log( 'Local Server started and listening for requests.' )
+
+
+================================================
+FILE: tests/server/remote-server-events.mjs
+================================================
+import fs from 'fs'
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from 'flowmcp'
+import { RemoteServer } from './../../src/index.mjs'
+
+
+function getEnvObject( { source, envPath } ) {
+    let envObject
+
+    if( source === 'unknown' ) {
+        envObject = fs
+            .readFileSync( envPath, 'utf-8' )
+            .split( '\n' )
+            .reduce( ( acc, line ) => {
+                const [ key, value ] = line.split( '=' )
+                if( key && value ) { acc[ key.trim() ] = value.trim() }
+                return acc
+            }, {} )
+    } else if( source === 'claude' ) {
+        envObject = process.env
+    } else { 
+        console.log( 'Unknown source:', source ) 
+    }
+
+    return { envObject }
+}
+
+
+const config = {
+    'silent': false,
+    'envPath': './../../.env',
+    'routes': [ { includeNamespaces: [], routePath: '/one', protocol: 'sse', bearerToken: null } ]
+}
+
+const { silent, envPath, routes } = config
+const { includeNamespaces, excludeNamespaces, activateTags, source } = FlowMCP
+    .getArgvParameters( {
+        'argv': process.argv,
+        'includeNamespaces': [],
+        'excludeNamespaces': [],
+        'activateTags': [], 
+    } )
+const { envObject } = getEnvObject( { source, envPath } )
+
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const remoteServer = new RemoteServer( { silent } )
+const events = remoteServer.getEvents()
+events
+    .on( 'sessionCreated', ( { protocol, sessionId } ) => {
+        console.log( `Session created: Protocol: ${protocol}, Session ID: ${sessionId}` )
+        return true
+    } )
+    .on( 'callReceived', ( { protocol, sessionId, method, toolName } ) => {
+        console.log( `Call: Protocol: ${protocol}, Session ID: ${sessionId}, method ${method}, toolName: ${toolName}` )
+    } )
+    .on( 'sessionClosed', ( { protocol, sessionId } ) => {
+        console.log( `Session closed: Protocol: ${protocol}, Session ID: ${sessionId}` )
+    } )
+
+const { routesActivationPayloads } = RemoteServer
+    .prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } )
+remoteServer
+    .start( { routesActivationPayloads } )
+
+
+
+
+
+
+================================================
+FILE: tests/server/remote-server.mjs
+================================================
+import fs from 'fs'
+import { SchemaImporter } from 'schemaimporter'
+
+import { FlowMCP } from 'flowmcp'
+import { RemoteServer } from './../../src/index.mjs'
+
+
+function getEnvObject( { source, envPath } ) {
+    let envObject
+
+    if( source === 'unknown' ) {
+        envObject = fs
+            .readFileSync( envPath, 'utf-8' )
+            .split( '\n' )
+            .reduce( ( acc, line ) => {
+                const [ key, value ] = line.split( '=' )
+                if( key && value ) { acc[ key.trim() ] = value.trim() }
+                return acc
+            }, {} )
+    } else if( source === 'claude' ) {
+        envObject = process.env
+    } else { 
+        console.log( 'Unknown source:', source ) 
+    }
+
+    return { envObject }
+}
+
+
+const config = {
+    'silent': false,
+    'envPath': './../../.env',
+    'routes': [ { includeNamespaces: [ ], routePath: '/one', protocol: 'sse', bearerToken: null } ]
+}
+
+const { silent, envPath, routes } = config
+const { includeNamespaces, excludeNamespaces, activateTags, source } = FlowMCP
+    .getArgvParameters( {
+        'argv': process.argv,
+        'includeNamespaces': [],
+        'excludeNamespaces': [],
+        'activateTags': [], 
+    } )
+const { envObject } = getEnvObject( { source, envPath } )
+const arrayOfSchemas = await SchemaImporter
+    .loadFromFolder( {
+        excludeSchemasWithImports: true,
+        excludeSchemasWithRequiredServerParams: true,
+        addAdditionalMetaData: true,
+        outputType: 'onlySchema'
+    } )
+
+const remoteServer = new RemoteServer( { silent } )
+const { routesActivationPayloads } = RemoteServer
+    .prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } )
+remoteServer
+    .start( { routesActivationPayloads } )
+
+
+
+
+
+
+================================================
+FILE: .do/deploy.template.yaml
+================================================
+spec:
+  name: flowmcp-server-stateless
+  services:
+    - name: web
+      git:
+        repo_clone_url: https://github.com/FlowMCP/flowmcp-servers
+        branch: main
+      build_command: npm install
+      run_command: npm run start:digitalocean
+      environment_slug: node-js
+      instance_size_slug: basic-xxs
+      instance_count: 1
+      routes:
+        - path: /
+
+
+================================================
+FILE: .github/test-on-release.mjs
+================================================
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { FlowMCP } from 'flowmcp'
+
+
+const server = new McpServer( {
+    'name': 'Local Server',
+    'description': 'A local Model Context Protocol server',
+    'version': '1.2.2', 
+} )
+
+const schema = {
+    namespace: "poap",
+    name: "POAP GraphQL",
+    description: "GraphQL endpoint for accessing POAP event data and metadata",
+    docs: ["https://public.compass.poap.tech/v1/graphql"],
+    tags: ["production", "poap.getTypename"],
+    flowMCP: "1.2.0",
+    root: "https://public.compass.poap.tech/v1/graphql",
+    requiredServerParams: [],
+    headers: {
+        "content-type": "application/json"
+    },
+    routes: {
+        getTypename: {
+            requestMethod: "POST",
+            description: "Basic connectivity test to retrieve __typename from the POAP GraphQL endpoint",
+            route: "/",
+            parameters: [ { position: { key: "query", value: "query { __typename }", location: "body" }, z: { primitive: "string()", options: [] } } ],
+            tests: [ { _description: "Run GraphQL __typename test" } ],
+            modifiers: []
+        }
+    },
+    handlers: {}
+}
+
+FlowMCP
+    .activateServerTool( {
+        'server': server, 
+        schema, 
+        routeName: 'getTypename',
+        serverParams: {}, 
+        'silent': true 
+    } )
+
+const transport = new StdioServerTransport()
+server.connect( transport )
+console.log( 'Local Server started and listening for requests.' )
+server.close()
+
+
+================================================
+FILE: .github/workflows/test-on-release.yml
+================================================
+name: Node Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run plain test
+        run: node .github/test-on-release.mjs
+
+

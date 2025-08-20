@@ -1,0 +1,79 @@
+Please Read Instructions on pg. 2
+
+Why are we here?
+2
+Web3 is public by default. That’s broken.
+We need privacy tools that are usable, real, and available to anyone.
+Encrypted ERC20 (eERC20) is a new foundation, but what we build on it is up to you.
+Build real solutions
+Innovate
+
+Teams
+3
+Who is this hackathon for?
+🧑‍💻 Developers🎯 Founders🎓 Students🎨 Product Designers🌱 The Curious
+🌎Anyone…
+
+ 
+Team Size: 3-4 Team members*
+*Not mandatory, but suggested
+
+
+ 
+
+What to build?
+4
+Product Tracks
+
+Program Structure
+5
+By Stage
+Stage 1
+Stage 2
+Stage 3
+Submission: Upload project to BuilderHub 
+ Prototype-> Repo, Product Roadmap
+Dates: August 23
+
+Submission: Update Submission -> GTM Strategy and Progress on Milestones defined on S1
+Dates: September 07
+
+Submission: Live Pitch -> Functional MVP, Clear product strategy
+Dates: September 16
+
+
+Prizes
+6
+By Stage
+Stage 1
+Stage 2
+Stage 3
+$5,000  
+
+1:1 Technical and Business Mentorships
+
+
++
+$5,000  
+
+
+1:1 Technical and Business Mentorships
+
++
+Non-stage winners are still eligible for next stage prizes 
+$15,000  
+
+
+Marketing, BD support, Codebase pitch
++
+
+Support
+Where to ask questions?
+Telegram 
+Office Hours 
+Academy + Docs 
+Add the Agenda 
+Build.avax.network
+t.me/avalancheacademy
+Join the chat
+Find answers
