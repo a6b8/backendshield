@@ -26,6 +26,9 @@ Key file: `eerc20-complete-doc.md`
 - Privacy features and cryptographic mechanisms
 - Integration patterns and best practices
 
+**Official Documentation:**
+- **[AvaCloud eERC-20 Gitbook](https://avacloud.gitbook.io/encrypted-erc)** - Complete official documentation
+
 **When to use**: Understanding eERC-20 architecture, privacy features, and implementation requirements.
 
 ### 1-eerc20--repo-code/
@@ -34,6 +37,10 @@ Key file: `eerc20-complete-doc.md`
 Key files:
 - `avalabs-eerc20.txt`: Avalabs eERC-20 SDK source code
 - `eerc-backend-converter-repo.txt`: Backend converter repository example
+
+**Official Repositories:**
+- **[Avalabs eERC-20 SDK](https://github.com/ava-labs/ac-eerc-sdk)** - Official SDK by Avalabs
+- **[eERC Backend Converter](https://github.com/alejandro99so/eerc-backend-converter)** - Backend converter implementation example
 
 Contains practical implementation code for:
 - eERC-20 token interactions

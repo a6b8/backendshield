@@ -20,6 +20,11 @@
 - **[🏠 FlowMCP Platform](https://www.flowmcp.org)** - Main platform and configurator
 - **[🧪 Community Servers](https://community.flowmcp.org)** - Experimental MCP servers
 
+### Key Repositories
+- **[📦 Avalabs eERC-20 SDK](https://github.com/ava-labs/ac-eerc-sdk)** - Official eERC-20 SDK
+- **[🔄 eERC Backend Converter](https://github.com/alejandro99so/eerc-backend-converter)** - Backend converter implementation
+- **[📖 eERC-20 Documentation](https://avacloud.gitbook.io/encrypted-erc)** - Official AvaCloud docs
+
 ## 🛠️ Technical Stack
 
 - **Blockchain**: Avalanche C-Chain
