@@ -24,6 +24,7 @@
 - **[📦 Avalabs eERC-20 SDK](https://github.com/ava-labs/ac-eerc-sdk)** - Official eERC-20 SDK
 - **[🔄 eERC Backend Converter](https://github.com/alejandro99so/eerc-backend-converter)** - Backend converter implementation
 - **[📖 eERC-20 Documentation](https://avacloud.gitbook.io/encrypted-erc)** - Official AvaCloud docs
+- **[🎨 3dent Frontend](https://github.com/BeratOz01/3dent)** - Example front-end application for eERC ([Live Demo](https://www.3dent.xyz))
 
 ## 🛠️ Technical Stack
 
