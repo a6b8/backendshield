@@ -9,6 +9,7 @@
 ### About BackendShield
 - **[📖 Project Overview](about/PROJECT.md)** - Complete project description and architecture
 - **[🗺️ Development Roadmap](about/ROADMAP.md)** - Three-stage hackathon timeline and progress
+- **[👤 User Flow Diagram](about/USER_FLOW.md)** - Complete user journey from payment to API usage
 
 ### Resources & References
 - **[📚 Research Documentation](resources/RESOURCES.md)** - All technical references and guides
