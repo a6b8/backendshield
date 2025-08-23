@@ -44,15 +44,15 @@
 
 ## 📍 **Key Contract Addresses**
 
-| Contract | Address | Purpose |
-|----------|---------|---------|
-| **EncryptedERC** | `0x10f9f3F9b014aD4776AFb3B63F67bA06CA65c0D8` | Main privacy token system |
-| **Registrar** | `0x8664516a027B96F024C68bF44A8c9D44380510B6` | User registration & key management |
-| **BackendShield Token** | `0xeD8186eDB85f63A35e57114bcCaA7Dfb6E5aCdA1` | BSHIELD test token (1M supply) |
-| **Demo User** | `0xf3d4E353390d073D408ca0D5D02B3E712C0E669a` | Registered user ready for testing |
-| **System Auditor** | `0x7E11f1Ad5b3176BC27049FC74e1725E941C1A457` | Compliance & decryption capabilities |
+| Contract | Address | Purpose | Verified |
+|----------|---------|---------|----------|
+| **[EncryptedERC](https://testnet.snowtrace.io/address/0x10f9f3F9b014aD4776AFb3B63F67bA06CA65c0D8#readContract)** | `0x10f9f3F9b014aD4776AFb3B63F67bA06CA65c0D8` | Main privacy token system | ✅ [Code](https://testnet.snowtrace.io/address/0x10f9f3F9b014aD4776AFb3B63F67bA06CA65c0D8#code) |
+| **[Registrar](https://testnet.snowtrace.io/address/0x8664516a027B96F024C68bF44A8c9D44380510B6#readContract)** | `0x8664516a027B96F024C68bF44A8c9D44380510B6` | User registration & key management | ✅ [Code](https://testnet.snowtrace.io/address/0x8664516a027B96F024C68bF44A8c9D44380510B6#code) |
+| **[BackendShield Token](https://testnet.snowtrace.io/address/0xeD8186eDB85f63A35e57114bcCaA7Dfb6E5aCdA1#readContract)** | `0xeD8186eDB85f63A35e57114bcCaA7Dfb6E5aCdA1` | BSHIELD test token (1M supply) | ✅ [Code](https://testnet.snowtrace.io/address/0xeD8186eDB85f63A35e57114bcCaA7Dfb6E5aCdA1#code) |
+| **[Demo User](https://testnet.snowtrace.io/address/0xf3d4E353390d073D408ca0D5D02B3E712C0E669a)** | `0xf3d4E353390d073D408ca0D5D02B3E712C0E669a` | Registered user ready for testing | 👤 EOA |
+| **[System Auditor](https://testnet.snowtrace.io/address/0x7E11f1Ad5b3176BC27049FC74e1725E941C1A457)** | `0x7E11f1Ad5b3176BC27049FC74e1725E941C1A457` | Compliance & decryption capabilities | 👤 EOA |
 
-> 🔍 **[View all contracts on Snowtrace →](https://testnet.snowtrace.io/address/0x10f9f3F9b014aD4776AFb3B63F67bA06CA65c0D8)**
+> 💡 **Tip**: Click contract names for read functions, "Code" links for verified source code
 
 ## 📁 Repository Structure
 
