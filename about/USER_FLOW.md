@@ -1,122 +1,135 @@
-# BackendShield Flow Diagrams
+# BackendShield Provider Revenue Distribution Flows
 
 ## Overview
-This document shows the user journey and automated Data Provider settlement process in the BackendShield credit-based payment system.
+This document shows the API provider registration journey, usage tracking process, and automated revenue distribution in the BackendShield system for fair FlowMCP provider compensation.
 
-## User Flow Diagram
+## Provider Flow Diagram
 
-### Main Flow
+### Main Provider Journey
 ```mermaid
 graph TD
-    A[User wants to use FlowMCP Server] --> B{Has Credits?}
+    A[API Provider wants to join FlowMCP] --> B[Register with BackendShield]
     
-    B -->|No| C[Payment Flow]
-    B -->|Yes| D[API Usage Flow]
+    B --> B1[Generate cryptographic keys]
+    B1 --> B2[Register public key for private payouts]
+    B2 --> B3[Provide API integration details]
+    B3 --> C[Integration with FlowMCP]
     
-    C --> C1[Connect Wallet]
-    C1 --> C2[Pay USDC to FlowMCP via EIP-3009]
-    C2 --> C3[FlowMCP validates payment]
-    C3 --> C4[FlowMCP notifies BackendShield]
-    C4 --> C5[BackendShield converts to eERC-20 credits]
-    C5 --> D
+    C --> C1[API gets added to FlowMCP ecosystem]
+    C1 --> C2[FlowMCP servers route user requests]
+    C2 --> C3[Provider serves API requests]
+    C3 --> C4[FlowMCP tracks usage metrics]
+    C4 --> C5[Usage data sent to BackendShield]
     
-    D --> D1[Make API request to FlowMCP]
-    D1 --> D2[FlowMCP checks credits with BackendShield]
-    D2 --> D3[Forward to Data Provider]
-    D3 --> D4[Return API response]
-    D4 --> D5[FlowMCP submits metrics to BackendShield]
-    D5 --> D6{Continue?}
+    C5 --> D[Revenue Distribution]
+    D --> D1[BackendShield calculates fair share]
+    D1 --> D2[Generate zero-knowledge proofs]
+    D2 --> D3[Execute encrypted eERC-20 transfer]
+    D3 --> D4[Provider earnings available on-chain]
     
-    D6 -->|Yes| D1
-    D6 -->|Check Balance| F[Query Balance via FlowMCP]
-    D6 -->|Withdraw| G[Request Withdrawal]
-    D6 -->|No| H[End Session]
+    D4 --> E{Provider Action}
+    E -->|Check Earnings| F[Query encrypted balance]
+    E -->|Claim Earnings| G[Withdraw from eERC-20 contract]
+    E -->|Continue Service| C2
     
-    F --> D6
-    G --> G1[BackendShield converts eERC-20 back to USDC]
-    G1 --> H
+    F --> E
+    G --> G1[Provider receives USDC payout]
+    G1 --> E
 ```
 
-### Data Provider Settlement (Automated Background Process)
+### Automated Revenue Distribution Process
 ```mermaid
 graph TD
-    A[Timer: Every 24h] --> B[BackendShield aggregates metrics from all FlowMCP servers]
-    B --> C[Calculate usage share for each Data Provider]
-    C --> D[Calculate payout percentages]
+    A[Timer: Regular intervals] --> B[BackendShield collects usage metrics from all FlowMCP servers]
+    B --> C[Analyze API call attribution per provider]
+    C --> D[Calculate fair revenue percentages]
     
-    D --> E{Enough volume for settlement?}
-    E -->|No| F[Wait for next cycle]
-    E -->|Yes| G[Generate ZK proofs for transactions]
+    D --> E{Sufficient usage data?}
+    E -->|No| F[Wait for more data]
+    E -->|Yes| G[Generate zero-knowledge proofs for private transfers]
     
-    G --> H[Create encrypted eERC-20 transfers]
-    H --> I[Submit batch to Avalanche blockchain]
-    I --> J[Update Data Provider balances privately]
-    J --> K[Send notifications to KYC portal]
+    G --> H[Create encrypted eERC-20 payouts to providers]
+    H --> I[Submit batch transactions to Avalanche blockchain]
+    I --> J[Provider encrypted balances updated on-chain]
+    J --> K[Providers notified of available earnings]
     
-    K --> L[Data Providers can claim their funds]
+    K --> L[Providers can claim anytime via pull model]
     F --> A
+    
+    L --> M{Competitor visibility?}
+    M -->|None| N[Only provider sees their earnings]
+    M -->|Auditor only| O[Compliance verification available]
 ```
 
 ## Flow Details
 
-### 1. Initial Payment (One-time Setup)
-- **Trigger**: User needs credits for first time
-- **Process**: Standard EIP-3009 USDC authorization
-- **Privacy**: Payment amount visible on blockchain (public)
-- **Result**: User has encrypted eERC-20 credits
+### 1. Provider Registration (One-time Setup)
+- **Trigger**: API provider wants to join FlowMCP ecosystem
+- **Process**: Generate keys, register with PrivateShare, integrate with API platform
+- **Privacy**: Provider identity registered but earnings will be encrypted
+- **Result**: Provider ready to receive private revenue distribution
 
-### 2. API Usage (Core Experience)
-- **Trigger**: User makes API request
-- **Authentication**: Signed messages (no repeated blockchain transactions)
-- **Privacy**: Usage amounts and patterns encrypted
-- **Performance**: Near-instant credit deduction
+### 2. API Usage Tracking (Continuous)
+- **Trigger**: Users make API requests through API platforms
+- **Attribution**: API platforms track which provider served each request
+- **Metrics**: Usage data (calls, response times, data transferred) collected
+- **Privacy**: Individual usage patterns remain private from competitors
 
-### 3. Credit Management
-- **Balance Check**: Dedicated API route
-- **Top-up**: Same as initial payment
-- **Withdrawal**: Convert remaining eERC-20 back to USDC
+### 3. Revenue Calculation (Automated)
+- **Frequency**: Regular intervals based on usage volume
+- **Fairness**: Revenue split based on actual API usage metrics
+- **Precision**: USDC 6-decimal precision enables micro-payments
+- **Transparency**: Providers can verify their share is fair
 
-### 4. Data Provider Compensation (Background)
-- **Frequency**: Regular automated polling (24h cycles)
-- **Privacy**: Payout amounts encrypted via ZK proofs
-- **Distribution**: Based on actual usage metrics from FlowMCP servers
-- **Claiming**: Data Providers use KYC web portal
+### 4. Private Earnings Distribution (Background)
+- **Technology**: Zero-knowledge proofs for encrypted transfers
+- **Privacy**: Competitors cannot see individual provider earnings
+- **Availability**: Earnings ready on-chain for anytime claiming
+- **Compliance**: Auditor can verify total distributions without revealing individual amounts
 
 ## Key Privacy Features
 
 | Component | Visibility | Privacy Level |
 |-----------|------------|---------------|
-| Initial USDC Payment | Public on blockchain | ❌ No privacy |
-| Credit Balance | Server knows, blockchain encrypted | ✅ Private amounts |
-| API Usage Patterns | Server tracks, blockchain encrypted | ✅ Private usage |
-| Data Provider Payouts | BackendShield knows, blockchain encrypted | ✅ Private earnings |
+| Provider Registration | PrivateShare knows, public key on-chain | ✅ Identity public, earnings private |
+| Usage Metrics | API platforms track, PrivateShare processes | ✅ Individual patterns hidden |
+| Revenue Calculations | PrivateShare knows totals, providers know their share | ✅ Competitor-blind earnings |
+| Provider Payouts | Only provider + auditor can decrypt | ✅ Fully private earnings distribution |
+| Earnings Claims | On-chain but encrypted amounts | ✅ Claiming visible, amounts hidden |
 
-## User Experience Benefits
+## Provider Experience Benefits
 
-1. **One Payment, Multiple Uses**: Pay once, use credits for many API calls
-2. **No Wallet Prompts**: Only sign messages, no blockchain transactions during usage
-3. **Transparent Pricing**: Always know credit costs upfront
-4. **Privacy by Default**: Usage patterns hidden from external observers
-5. **Easy Withdrawal**: Get remaining funds back anytime
+1. **Fair Compensation**: Revenue based on actual API usage, not arbitrary splits
+2. **Micro-Precision Payouts**: Even tiny API calls generate compensation (0.000001 USDC minimum)
+3. **Competitor-Blind Earnings**: Strategic business intelligence protection
+4. **On-Chain Security**: Earnings always available, even if backend is offline
+5. **Zero Thresholds**: No minimum payout amounts excluding small providers
+6. **Automated Distribution**: No manual payment processing or invoicing needed
 
 ## Technical Flow States
 
-### User States
-- `no_credits` → Requires payment
-- `has_credits` → Can make API calls
-- `insufficient_credits` → Needs top-up
-- `withdrew_funds` → Session ended
+### Provider States
+- `unregistered` → Needs BackendShield registration
+- `registered` → Ready for FlowMCP integration
+- `integrated` → Serving API requests through FlowMCP
+- `earning_revenue` → Usage metrics being collected
 
-### Server States
-- `payment_received` → Converting to eERC-20
-- `credits_issued` → Ready for API calls
-- `processing_request` → Handling API call
-- `logging_metrics` → Recording usage privately
+### PrivateShare States
+- `collecting_metrics` → Gathering usage data from API platforms
+- `calculating_revenue` → Processing fair distribution percentages
+- `generating_proofs` → Creating zero-knowledge proofs for transfers
+- `distributing_payments` → Executing encrypted eERC-20 transfers
 
-### Data Provider States  
-- `serving_requests` → Processing API calls via FlowMCP
-- `metrics_collected` → Usage logged by BackendShield for payout
-- `payout_calculated` → Ready for encrypted distribution
-- `funds_claimable` → Available via KYC portal
+### Provider Earnings States
+- `metrics_submitted` → Usage data sent to BackendShield
+- `revenue_calculated` → Provider share determined
+- `payment_queued` → Encrypted transfer prepared
+- `earnings_available` → Funds claimable on-chain
+- `funds_claimed` → Provider withdrew earnings
 
-This flow ensures maximum privacy while maintaining simplicity for users and fair compensation for Data Providers.
+### API Platform States
+- `routing_requests` → Directing API calls to appropriate providers
+- `tracking_usage` → Recording metrics for revenue calculation
+- `submitting_data` → Sending usage metrics to PrivateShare
+
+This flow ensures maximum privacy for provider earnings while maintaining transparency in the fairness of revenue distribution and enabling sustainable compensation for all API providers in any ecosystem.

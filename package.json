@@ -1,35 +1,37 @@
 {
-  "name": "backendshield",
-  "version": "0.1.0",
-  "description": "Credit-based micropayments eliminate payment friction while encrypting transaction amounts and provider earnings on-chain",
-  "main": "index.js",
-  "type": "module",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "node --watch index.js",
-    "start": "node index.js"
-  },
-  "keywords": [
-    "x402",
-    "eerc20",
-    "mcp",
-    "privacy",
-    "micropayments",
-    "blockchain",
-    "avalanche",
-    "hack2build"
-  ],
-  "author": "a6b8",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/a6b8/backendshield.git"
-  },
-  "bugs": {
-    "url": "https://github.com/a6b8/backendshield/issues"
-  },
-  "homepage": "https://community.flowmcp.org/backendshield"
+    "name": "eerc20-manager",
+    "version": "1.0.0",
+    "description": "Comprehensive eERC20 interaction manager with zero-knowledge proof support",
+    "type": "module",
+    "main": "./src/index.mjs",
+    "scripts": {
+        "test": "node --test",
+        "test:unit": "node --test tests/unit/*.test.mjs",
+        "test:integration": "node --test tests/integration/*.test.mjs",
+        "test:watch": "node --test --watch",
+        "start": "node ./src/index.mjs"
+    },
+    "dependencies": {
+        "@avalabs/eerc-sdk": "^1.0.0",
+        "@zk-kit/baby-jubjub": "^1.0.3",
+        "ethers": "^6.8.0",
+        "maci-crypto": "^2.5.0",
+        "poseidon-lite": "^0.3.0",
+        "snarkjs": "^0.7.3"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0"
+    },
+    "keywords": [
+        "eERC20",
+        "zero-knowledge",
+        "privacy",
+        "blockchain",
+        "avalanche"
+    ],
+    "author": "eERC20 Team",
+    "license": "MIT",
+    "engines": {
+        "node": ">=22.0.0"
+    }
 }
